@@ -1,0 +1,358 @@
+import os
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+intents = discord.Intents.default()
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+
+# ---------- FORMULAIRE : DOSSIER PERSONNEL ----------
+class DossierPersonnelModal(discord.ui.Modal, title="Dossier Personnel"):
+    nom = discord.ui.TextInput(label="Nom complet", placeholder="Ex: Julien Moreau")
+    age = discord.ui.TextInput(label="Âge", placeholder="Ex: 39")
+    groupe_sanguin = discord.ui.TextInput(label="Groupe sanguin", placeholder="Ex: A+")
+    allergies = discord.ui.TextInput(
+        label="Allergies / Antécédents",
+        style=discord.TextStyle.paragraph,
+        placeholder="Ex: Pénicilline, asthme léger",
+        required=False,
+    )
+    contact_urgence = discord.ui.TextInput(
+        label="Contact d'urgence", placeholder="Ex: Sophie Moreau - 06 98 76 54 32", required=False
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        embed = discord.Embed(title="📋 Dossier Personnel", color=discord.Color.blue())
+        embed.add_field(name="Nom", value=self.nom.value, inline=True)
+        embed.add_field(name="Âge", value=self.age.value, inline=True)
+        embed.add_field(name="Groupe sanguin", value=self.groupe_sanguin.value, inline=True)
+        embed.add_field(
+            name="Allergies / Antécédents",
+            value=self.allergies.value or "Aucun",
+            inline=False,
+        )
+        embed.add_field(
+            name="Contact d'urgence",
+            value=self.contact_urgence.value or "Non renseigné",
+            inline=False,
+        )
+        embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
+        await interaction.response.send_message(embed=embed)
+
+
+# ---------- FORMULAIRE : DOSSIER D'INTERVENTION ----------
+class DossierInterventionModal(discord.ui.Modal, title="Dossier d'Intervention"):
+    blessure = discord.ui.TextInput(
+        label="Blessure", placeholder="Ex: Fracture ouverte jambe droite"
+    )
+    soins = discord.ui.TextInput(
+        label="Soins effectués",
+        style=discord.TextStyle.paragraph,
+        placeholder="Ex: Immobilisation, désinfection, antalgique",
+    )
+    transport = discord.ui.TextInput(
+        label="Transport", placeholder="Ex: CHU / Hôpital local", required=False
+    )
+    facture = discord.ui.TextInput(
+        label="Montant facturé (€)", placeholder="Ex: 395", required=False
+    )
+    statut_facture = discord.ui.TextInput(
+        label="Statut facturation", placeholder="Ex: Payé / En attente", required=False
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        embed = discord.Embed(title="🚑 Dossier d'Intervention", color=discord.Color.red())
+        embed.add_field(name="Blessure", value=self.blessure.value, inline=False)
+        embed.add_field(name="Soins effectués", value=self.soins.value, inline=False)
+        embed.add_field(
+            name="Transport", value=self.transport.value or "Non renseigné", inline=True
+        )
+        embed.add_field(
+            name="Montant facturé",
+            value=f"{self.facture.value} €" if self.facture.value else "N/A",
+            inline=True,
+        )
+        embed.add_field(
+            name="Statut",
+            value=self.statut_facture.value or "Non renseigné",
+            inline=True,
+        )
+        embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
+        await interaction.response.send_message(embed=embed)
+
+
+# ---------- COMMANDES SLASH ----------
+@bot.tree.command(name="dossier_personnel", description="Remplir un dossier personnel")
+async def dossier_personnel(interaction: discord.Interaction):
+    await interaction.response.send_modal(DossierPersonnelModal())
+
+
+@bot.tree.command(name="dossier_intervention", description="Remplir un dossier d'intervention")
+async def dossier_intervention(interaction: discord.Interaction):
+    await interaction.response.send_modal(DossierInterventionModal())
+
+
+# ---------- DONNÉES DE TRIAGE (fictif, RP) ----------
+TRIAGE_DATA = {
+    "tete": {
+        "label": "Tête",
+        "cases": [
+            {
+                "title": "Traumatisme crânien",
+                "symptoms": "Choc à la tête, maux de tête intenses, vertiges, confusion",
+                "soins": "Immobilisation du patient, surveillance neurologique rapprochée, TDM crânien pour écarter une hémorragie.",
+                "meds": "Antalgique léger (paracétamol), anti-nauséeux si vomissements.",
+                "urgent": True,
+            },
+            {
+                "title": "Plaie du cuir chevelu",
+                "symptoms": "Saignement abondant, plaie ouverte",
+                "soins": "Nettoyage de la plaie, points de suture si nécessaire, pansement compressif.",
+                "meds": "Antiseptique local, antalgique simple.",
+            },
+            {
+                "title": "Céphalée sévère / migraine",
+                "symptoms": "Douleur pulsatile, sensibilité à la lumière",
+                "soins": "Repos en environnement calme et sombre, surveillance de l'évolution.",
+                "meds": "Antalgique, anti-inflammatoire, antiémétique si nausées.",
+            },
+            {
+                "title": "Perte de connaissance brève",
+                "symptoms": "Évanouissement, pâleur, retour à la conscience rapide",
+                "soins": "Position latérale de sécurité, prise des constantes (tension, pouls, glycémie).",
+                "meds": "Selon la cause identifiée — à réévaluer après bilan.",
+            },
+        ],
+    },
+    "cou": {
+        "label": "Cou",
+        "cases": [
+            {
+                "title": "Entorse cervicale / torticolis",
+                "symptoms": "Douleur, raideur, mobilité réduite",
+                "soins": "Pose d'un collier cervical souple, repos.",
+                "meds": "Antalgique, décontractant musculaire.",
+            },
+            {
+                "title": "Traumatisme cervical (accident)",
+                "symptoms": "Douleur vive, engourdissement dans les bras",
+                "soins": "Immobilisation stricte (collier rigide + plan dur), imagerie avant toute mobilisation.",
+                "meds": "Antalgique fort sous surveillance médicale.",
+                "urgent": True,
+            },
+            {
+                "title": "Gêne respiratoire / gonflement",
+                "symptoms": "Œdème visible, voix rauque, difficulté à respirer",
+                "soins": "Surveillance des voies aériennes en priorité, oxygène si besoin.",
+                "meds": "Corticoïde, antihistaminique si origine allergique suspectée.",
+                "urgent": True,
+            },
+        ],
+    },
+    "thorax": {
+        "label": "Thorax",
+        "cases": [
+            {
+                "title": "Douleur thoracique (suspicion cardiaque)",
+                "symptoms": "Oppression, douleur irradiant dans le bras ou la mâchoire",
+                "soins": "ECG immédiat, monitoring cardiaque continu, oxygène.",
+                "meds": "Aspirine, dérivé nitré, antalgique.",
+                "urgent": True,
+            },
+            {
+                "title": "Fracture de côte",
+                "symptoms": "Douleur à l'inspiration, point douloureux localisé",
+                "soins": "Contention légère, kinésithérapie respiratoire pour éviter les complications.",
+                "meds": "Antalgique, anti-inflammatoire.",
+            },
+            {
+                "title": "Crise d'asthme / gêne respiratoire",
+                "symptoms": "Sifflement, essoufflement, toux",
+                "soins": "Position assise, oxygène, nébulisation.",
+                "meds": "Bronchodilatateur, corticoïde inhalé.",
+            },
+        ],
+    },
+    "abdomen": {
+        "label": "Abdomen",
+        "cases": [
+            {
+                "title": "Douleur abdominale aiguë",
+                "symptoms": "Douleur localisée (souvent en bas à droite), fièvre",
+                "soins": "Échographie ou scanner abdominal, surveillance, jeûne en prévision d'une éventuelle opération.",
+                "meds": "Antalgique, antibiotique si infection confirmée.",
+                "urgent": True,
+            },
+            {
+                "title": "Plaie pénétrante abdominale",
+                "symptoms": "Plaie ouverte, saignement, signes de choc possibles",
+                "soins": "Compression de la plaie, pose de perfusion, transfert rapide au bloc opératoire.",
+                "meds": "Antibiotique à large spectre, antalgique fort.",
+                "urgent": True,
+            },
+            {
+                "title": "Gastro-entérite",
+                "symptoms": "Vomissements, diarrhée, signes de déshydratation",
+                "soins": "Réhydratation (orale ou par perfusion), repos digestif.",
+                "meds": "Anti-nauséeux, solution de réhydratation orale.",
+            },
+        ],
+    },
+    "bras": {
+        "label": "Bras",
+        "cases": [
+            {
+                "title": "Fracture du bras / poignet",
+                "symptoms": "Douleur, déformation visible, impossibilité de bouger",
+                "soins": "Immobilisation par attelle ou plâtre, radiographie de contrôle.",
+                "meds": "Antalgique, anti-inflammatoire.",
+            },
+            {
+                "title": "Coupure / plaie superficielle",
+                "symptoms": "Saignement modéré, plaie propre ou souillée",
+                "soins": "Nettoyage, suture si la plaie est profonde, pansement.",
+                "meds": "Antiseptique local, antalgique léger.",
+            },
+            {
+                "title": "Brûlure",
+                "symptoms": "Rougeur, cloques, douleur au contact",
+                "soins": "Refroidissement immédiat à l'eau tempérée, pansement stérile non adhérent.",
+                "meds": "Crème cicatrisante, antalgique.",
+            },
+        ],
+    },
+    "jambes": {
+        "label": "Jambes",
+        "cases": [
+            {
+                "title": "Entorse de la cheville",
+                "symptoms": "Gonflement, douleur, difficulté à marcher",
+                "soins": "Protocole repos / glace / compression / élévation, immobilisation légère.",
+                "meds": "Anti-inflammatoire, antalgique.",
+            },
+            {
+                "title": "Fracture de jambe",
+                "symptoms": "Douleur intense, déformation visible",
+                "soins": "Immobilisation, radiographie, chirurgie parfois nécessaire.",
+                "meds": "Antalgique fort, anticoagulant préventif.",
+                "urgent": True,
+            },
+            {
+                "title": "Suspicion de phlébite",
+                "symptoms": "Jambe gonflée, chaude et douloureuse",
+                "soins": "Échographie doppler de contrôle, surveillance rapprochée.",
+                "meds": "Anticoagulant.",
+                "urgent": True,
+            },
+        ],
+    },
+}
+
+
+def build_case_embed(zone_key: str, case: dict) -> discord.Embed:
+    title = case["title"]
+    if case.get("urgent"):
+        title += " ⚠️ Priorité 1"
+    embed = discord.Embed(
+        title=title,
+        description=f"Zone : **{TRIAGE_DATA[zone_key]['label']}**",
+        color=discord.Color.red() if case.get("urgent") else discord.Color.teal(),
+    )
+    embed.add_field(name="Symptômes", value=case["symptoms"], inline=False)
+    embed.add_field(name="Soins", value=case["soins"], inline=False)
+    embed.add_field(name="Médicaments", value=case["meds"], inline=False)
+    embed.set_footer(text="Contenu fictif pour RP — pas un guide médical réel")
+    return embed
+
+
+class CaseSelect(discord.ui.Select):
+    def __init__(self, zone_key: str):
+        self.zone_key = zone_key
+        options = [
+            discord.SelectOption(
+                label=c["title"][:100],
+                description=c["symptoms"][:100],
+                value=str(i),
+                emoji="⚠️" if c.get("urgent") else None,
+            )
+            for i, c in enumerate(TRIAGE_DATA[zone_key]["cases"])
+        ]
+        super().__init__(placeholder="Choisis un cas...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        case = TRIAGE_DATA[self.zone_key]["cases"][int(self.values[0])]
+        embed = build_case_embed(self.zone_key, case)
+        await interaction.response.edit_message(embed=embed, view=self.view)
+
+
+class CaseView(discord.ui.View):
+    def __init__(self, zone_key: str):
+        super().__init__(timeout=120)
+        self.add_item(CaseSelect(zone_key))
+        self.add_item(BackToZoneButton())
+
+
+class BackToZoneButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="⬅ Changer de zone", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="🩺 Fiche de Triage",
+            description="Choisis une zone du corps pour voir les cas possibles, les soins et les médicaments associés.",
+            color=discord.Color.blue(),
+        )
+        await interaction.response.edit_message(embed=embed, view=ZoneView())
+
+
+class ZoneSelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label=data["label"], value=key)
+            for key, data in TRIAGE_DATA.items()
+        ]
+        super().__init__(placeholder="Choisis une zone du corps...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        zone_key = self.values[0]
+        embed = discord.Embed(
+            title=f"🩺 Triage — {TRIAGE_DATA[zone_key]['label']}",
+            description="Choisis un cas dans la liste ci-dessous.",
+            color=discord.Color.blue(),
+        )
+        await interaction.response.edit_message(embed=embed, view=CaseView(zone_key))
+
+
+class ZoneView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+        self.add_item(ZoneSelect())
+
+
+@bot.tree.command(name="triage", description="Outil de triage RP : zone du corps -> cas -> soins")
+async def triage(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🩺 Fiche de Triage",
+        description="Choisis une zone du corps pour voir les cas possibles, les soins et les médicaments associés.",
+        color=discord.Color.blue(),
+    )
+    embed.set_footer(text="Contenu fictif pour RP — pas un guide médical réel")
+    await interaction.response.send_message(embed=embed, view=ZoneView())
+
+
+GUILD_ID = discord.Object(id=1527797628228735047)
+
+
+@bot.event
+async def on_ready():
+    bot.tree.copy_global_to(guild=GUILD_ID)
+    await bot.tree.sync(guild=GUILD_ID)
+    print(f"Connecté en tant que {bot.user}")
+
+
+bot.run(TOKEN)
