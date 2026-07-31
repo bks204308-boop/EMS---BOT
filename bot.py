@@ -154,7 +154,6 @@ async def delete_dossier_personnel(user_id: int) -> bool:
 
 # ---------- EXPORT PDF ----------
 def clean_text_for_pdf(text: str) -> str:
-def clean_text_for_pdf(text: str) -> str:
     if not text:
         return "Non renseigne"
     replacements = {
@@ -167,18 +166,15 @@ def clean_text_for_pdf(text: str) -> str:
     return text.encode("ascii", "ignore").decode("ascii")
 
 
-
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
-    # 1. Configuration de la page A4 avec marges fixes
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.set_margins(15, 15, 15)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     
-    # Largeur utile imprimable (180 mm)
     w = pdf.epw 
 
-    # 2. EN-TÊTE MÉDICAL
+    # En-tête médical
     pdf.set_fill_color(24, 76, 120) 
     pdf.rect(15, 15, w, 22, style="F")
     
@@ -194,7 +190,7 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
     pdf.ln(14)
     pdf.set_text_color(0, 0, 0)
 
-    # 3. DATE DU DOCUMENT
+    # Date
     now_str = datetime.now(timezone.utc).strftime("%d/%m/%Y a %H:%M UTC")
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(100, 100, 100)
@@ -202,30 +198,25 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
     pdf.ln(2)
     pdf.set_text_color(0, 0, 0)
 
-    # 4. BLOCS D'INFORMATIONS
+    # Blocs d'informations
     for label, value in fields:
-        # Intitulé / Champ (Fond bleu clair)
         pdf.set_fill_color(235, 242, 250)
         pdf.set_draw_color(180, 205, 225)
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(24, 76, 120)
         
-        # On utilise une cellule avec padding propre pour ne pas déborder
         pdf.cell(w, 7, txt=clean_text_for_pdf(f"  {label.upper()}"), border=1, fill=True, new_x="LMARGIN", new_y="NEXT")
         
-        # Valeur / Contenu (Fond blanc)
         pdf.set_fill_color(255, 255, 255)
         pdf.set_draw_color(220, 220, 220)
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(30, 30, 30)
         
         val_text = clean_text_for_pdf(value or "Non renseigne")
-        
-        # multi_cell pour gérer le texte long sur plusieurs lignes sans dépasser
         pdf.multi_cell(w=w, h=6, txt=val_text, border=1, fill=True, align="L")
         pdf.ln(3)
 
-    # 5. PIED DE PAGE & SIGNATURE
+    # Pied de page
     if footer:
         pdf.ln(4)
         pdf.set_draw_color(24, 76, 120)
@@ -237,7 +228,6 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
         pdf.multi_cell(w=w, h=4, txt=clean_text_for_pdf(f"Unite d'intervention : {footer}"), align="L")
         pdf.cell(w, 4, txt="Document valide par les services de sante RP", align="R")
 
-    # 6. EXPORT
     out = pdf.output()
     pdf_bytes = bytes(out) if isinstance(out, (bytearray, bytes)) else str(out).encode("latin-1")
     
@@ -266,11 +256,9 @@ class ExportPDFView(discord.ui.View):
             )
         except Exception as e:
             logger.error(f"Erreur PDF : {e}", exc_info=True)
-            # Affiche l'erreur exacte dans Discord pour comprendre tout de suite
             await interaction.response.send_message(
                 f"❌ Erreur lors de la génération PDF :\n`{type(e).__name__}: {e}`", ephemeral=True
             )
-
 
 
 # ---------- FORMULAIRE : DOSSIER PERSONNEL ----------
@@ -347,7 +335,7 @@ class DossierInterventionModal(discord.ui.Modal, title="Dossier d'Intervention")
         label="Montant facturé ($)", placeholder="Ex: 395", required=False
     )
     statut_facture = discord.ui.TextInput(
-        label="Statut facturation", placeholder="Ex: Payé / En attente", required=False
+        label="Statut facturation", placeholder="Ex: Payée / En attente", required=False
     )
 
     def __init__(self, patient: Optional[discord.Member] = None):
@@ -366,7 +354,7 @@ class DossierInterventionModal(discord.ui.Modal, title="Dossier d'Intervention")
         )
         embed.add_field(
             name="Montant facturé",
-            value=f"{self.facture.value} €" if self.facture.value else "N/A",
+            value=f"{self.facture.value} $" if self.facture.value else "N/A",
             inline=True,
         )
         embed.add_field(
@@ -383,8 +371,6 @@ class DossierInterventionModal(discord.ui.Modal, title="Dossier d'Intervention")
                     f"Allergies / Antécédents : **{dossier['allergies'] or 'Aucun'}**"
                 )
                 embed.add_field(name="⚠️ Rappel dossier personnel", value=rappel, inline=False)
-
-        embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
 
         record_id = await save_dossier_intervention(
             patient_user_id=self.patient.id if self.patient else None,
@@ -406,7 +392,7 @@ class DossierInterventionModal(discord.ui.Modal, title="Dossier d'Intervention")
                 ("Blessure", self.blessure.value),
                 ("Soins effectués", self.soins.value),
                 ("Transport", self.transport.value or "Non renseigné"),
-                ("Montant facturé", f"{self.facture.value} €" if self.facture.value else "N/A"),
+                ("Montant facturé", f"{self.facture.value} $" if self.facture.value else "N/A"),
                 ("Statut facturation", self.statut_facture.value or "Non renseigné"),
             ],
             filename=f"intervention_{record_id}.pdf",
@@ -421,10 +407,7 @@ class MedicalBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # Initialisation de la BDD
         await init_db()
-        
-        # Synchronisation globale des commandes Slash
         await self.tree.sync()
         logger.info("Commandes Slash synchronisées à l'échelle globale.")
 
