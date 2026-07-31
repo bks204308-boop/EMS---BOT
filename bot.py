@@ -159,7 +159,7 @@ def clean_text_for_pdf(text: str) -> str:
         return "Non renseigné"
     # Remplacement des caractères courants qui posent problème
     replacements = {
-        "€": "EUR",
+        "$": "dollars",
         "’": "'",
         "“": '"',
         "”": '"',
@@ -172,6 +172,7 @@ def clean_text_for_pdf(text: str) -> str:
     return text.encode("latin-1", "ignore").decode("latin-1")
 
 
+def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
     pdf = FPDF()
     pdf.add_page()
@@ -195,11 +196,20 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
         pdf.ln(4)
         pdf.multi_cell(0, 5, clean_text_for_pdf(footer))
         
-    buf = io.BytesIO()
-    # fpdf2 permet d'écrire directement dans un buffer d'octets
-    pdf.output(buf)
+    # Génération sécurisée des octets du PDF
+    pdf_bytes = pdf.output()
+    if isinstance(pdf_bytes, str):
+        pdf_bytes = pdf_bytes.encode("latin-1")
+    elif pdf_bytes is None:
+        buf = io.BytesIO()
+        pdf.output(buf)
+        buf.seek(0)
+        return buf
+
+    buf = io.BytesIO(pdf_bytes)
     buf.seek(0)
     return buf
+
 
 
 class ExportPDFView(discord.ui.View):
@@ -297,7 +307,7 @@ class DossierInterventionModal(discord.ui.Modal, title="Dossier d'Intervention")
         label="Transport", placeholder="Ex: CHU / Hôpital local", required=False
     )
     facture = discord.ui.TextInput(
-        label="Montant facturé (€)", placeholder="Ex: 395", required=False
+        label="Montant facturé ($)", placeholder="Ex: 395", required=False
     )
     statut_facture = discord.ui.TextInput(
         label="Statut facturation", placeholder="Ex: Payé / En attente", required=False
