@@ -55,7 +55,7 @@ class DossierInterventionModal(discord.ui.Modal, title="Dossier d'Intervention")
         label="Transport", placeholder="Ex: CHU / Hôpital local", required=False
     )
     facture = discord.ui.TextInput(
-        label="Montant facturé (€)", placeholder="Ex: 395", required=False
+        label="Montant facturé ($)", placeholder="Ex: 395", required=False
     )
     statut_facture = discord.ui.TextInput(
         label="Statut facturation", placeholder="Ex: Payé / En attente", required=False
