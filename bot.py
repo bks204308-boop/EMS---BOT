@@ -154,25 +154,18 @@ async def delete_dossier_personnel(user_id: int) -> bool:
 
 # ---------- EXPORT PDF ----------
 def clean_text_for_pdf(text: str) -> str:
-    """Nettoie le texte pour éviter les erreurs d'encodage FPDF (supprime émojis et caractères non-Latin1)"""
     if not text:
-        return "Non renseigné"
-    # Remplacement des caractères courants qui posent problème
+        return "Non renseigne"
     replacements = {
-        "$": "dollars",
-        "’": "'",
-        "“": '"',
-        "”": '"',
-        "–": "-",
-        "—": "-",
+        "$": "Dollars", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-",
+        "é": "e", "è": "e", "ê": "e", "ë": "e", "à": "a", "â": "a",
+        "ù": "u", "û": "u", "î": "i", "ï": "i", "ô": "o", "ç": "c"
     }
     for old, new in replacements.items():
-        text = text.replace(old, new)
-    # Convertit en latin-1 en ignorant les émojis/caractères non pris en charge
-    return text.encode("latin-1", "ignore").decode("latin-1")
+        text = str(text).replace(old, new)
+    return text.encode("ascii", "ignore").decode("ascii")
 
 
-def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
     pdf = FPDF()
     pdf.add_page()
@@ -187,7 +180,7 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
         pdf.set_font("Helvetica", "B", 12)
         pdf.multi_cell(0, 7, clean_text_for_pdf(f"{label} :"))
         pdf.set_font("Helvetica", "", 12)
-        pdf.multi_cell(0, 7, clean_text_for_pdf(value or "Non renseigné"))
+        pdf.multi_cell(0, 7, clean_text_for_pdf(value or "Non renseigne"))
         pdf.ln(2)
         
     # Pied de page
@@ -196,20 +189,13 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
         pdf.ln(4)
         pdf.multi_cell(0, 5, clean_text_for_pdf(footer))
         
-    # Génération sécurisée des octets du PDF
-    pdf_bytes = pdf.output()
-    if isinstance(pdf_bytes, str):
-        pdf_bytes = pdf_bytes.encode("latin-1")
-    elif pdf_bytes is None:
-        buf = io.BytesIO()
-        pdf.output(buf)
-        buf.seek(0)
-        return buf
-
+    # Conversion securisee en octets
+    out = pdf.output()
+    pdf_bytes = bytes(out) if isinstance(out, (bytearray, bytes)) else str(out).encode("latin-1")
+    
     buf = io.BytesIO(pdf_bytes)
     buf.seek(0)
     return buf
-
 
 
 class ExportPDFView(discord.ui.View):
@@ -224,16 +210,19 @@ class ExportPDFView(discord.ui.View):
     async def export(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             buf = generate_pdf(self.title, self.fields, self.footer)
-            # Nettoyage du nom de fichier pour éviter les erreurs de pièces jointes Discord
             clean_filename = clean_text_for_pdf(self.filename).replace(" ", "_")
+            if not clean_filename.endswith(".pdf"):
+                clean_filename += ".pdf"
             await interaction.response.send_message(
                 file=discord.File(buf, filename=clean_filename), ephemeral=True
             )
         except Exception as e:
-            logger.error(f"Erreur génération PDF : {e}")
+            logger.error(f"Erreur PDF : {e}", exc_info=True)
+            # Affiche l'erreur exacte dans Discord pour comprendre tout de suite
             await interaction.response.send_message(
-                "❌ Impossible de générer le fichier PDF.", ephemeral=True
+                f"❌ Erreur lors de la génération PDF :\n`{type(e).__name__}: {e}`", ephemeral=True
             )
+
 
 
 # ---------- FORMULAIRE : DOSSIER PERSONNEL ----------
