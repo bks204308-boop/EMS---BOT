@@ -7,9 +7,6 @@ from PIL import Image, ImageDraw
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-intents = discord.Intents.default()
-intents.message_content = True
-
 # ---------- FORMULAIRE : DOSSIER PERSONNEL ----------
 class DossierPersonnelModal(discord.ui.Modal, title="Dossier Personnel"):
     nom = discord.ui.TextInput(label="Nom complet", placeholder="Ex: Julien Moreau")
@@ -83,17 +80,6 @@ class DossierInterventionModal(discord.ui.Modal, title="Dossier d'Intervention")
         )
         embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
         await interaction.response.send_message(embed=embed)
-
-
-# ---------- COMMANDES SLASH ----------
-@bot.tree.command(name="dossier_personnel", description="Remplir un dossier personnel")
-async def dossier_personnel(interaction: discord.Interaction):
-    await interaction.response.send_modal(DossierPersonnelModal())
-
-
-@bot.tree.command(name="dossier_intervention", description="Remplir un dossier d'intervention")
-async def dossier_intervention(interaction: discord.Interaction):
-    await interaction.response.send_modal(DossierInterventionModal())
 
 
 # ---------- DONNÉES DE TRIAGE (fictif, RP) ----------
@@ -298,8 +284,7 @@ TRIAGE_DATA = {
     },
 }
 
-
-# ---------- GÉNÉRATION DE L'IMAGE DU CORPS (zone en surbrillance) ----------
+# ---------- GÉNÉRATION DE L'IMAGE DU CORPS ----------
 ZONE_SHAPES = {
     "tete": [("ellipse", 100, 42, 30)],
     "cou": [("rect", 86, 70, 28, 20)],
@@ -315,7 +300,6 @@ BASE_STROKE = (47, 143, 209, 255)
 HL_FILL = (92, 179, 238, 255)
 HL_STROKE = (255, 255, 255, 255)
 BG_COLOR = (16, 30, 51, 255)
-
 
 def generate_body_image(highlight: str = None) -> io.BytesIO:
     scale = 3
@@ -346,7 +330,6 @@ def generate_body_image(highlight: str = None) -> io.BytesIO:
     buf.seek(0)
     return buf
 
-
 def build_case_embed(zone_key: str, case: dict) -> discord.Embed:
     title = case["title"]
     if case.get("urgent"):
@@ -361,7 +344,6 @@ def build_case_embed(zone_key: str, case: dict) -> discord.Embed:
     embed.add_field(name="Médicaments", value=case["meds"], inline=False)
     embed.set_footer(text="Contenu fictif pour RP — pas un guide médical réel")
     return embed
-
 
 class CaseSelect(discord.ui.Select):
     def __init__(self, zone_key: str):
@@ -382,13 +364,11 @@ class CaseSelect(discord.ui.Select):
         embed = build_case_embed(self.zone_key, case)
         await interaction.response.edit_message(embed=embed, view=self.view)
 
-
 class CaseView(discord.ui.View):
     def __init__(self, zone_key: str):
         super().__init__(timeout=120)
         self.add_item(CaseSelect(zone_key))
         self.add_item(BackToZoneButton())
-
 
 class BackToZoneButton(discord.ui.Button):
     def __init__(self):
@@ -403,7 +383,6 @@ class BackToZoneButton(discord.ui.Button):
         file = discord.File(generate_body_image(), filename="body.png")
         embed.set_image(url="attachment://body.png")
         await interaction.response.edit_message(embed=embed, view=ZoneView(), attachments=[file])
-
 
 class ZoneSelect(discord.ui.Select):
     def __init__(self):
@@ -424,12 +403,36 @@ class ZoneSelect(discord.ui.Select):
         embed.set_image(url="attachment://body.png")
         await interaction.response.edit_message(embed=embed, view=CaseView(zone_key), attachments=[file])
 
-
 class ZoneView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=120)
         self.add_item(ZoneSelect())
 
+
+# ---------- CONFIGURATION ET INITIALISATION DU BOT ----------
+GUILD_ID = discord.Object(id=1527797628228735047)  # Ton ID de serveur[span_0](start_span)[span_0](end_span)
+
+class MedicalBot(commands.Bot):
+    async def setup_hook(self):
+        # Synchronise immédiatement et directement sur TON serveur
+        self.tree.copy_global_to(guild=GUILD_ID)
+        await self.tree.sync(guild=GUILD_ID)
+        print("Commandes Slash synchronisées avec succès sur le serveur !")
+
+intents = discord.Intents.default()
+intents.message_content = True
+
+bot = MedicalBot(command_prefix="!", intents=intents)
+
+
+# ---------- COMMANDES SLASH ----------
+@bot.tree.command(name="dossier_personnel", description="Remplir un dossier personnel")
+async def dossier_personnel(interaction: discord.Interaction):
+    await interaction.response.send_modal(DossierPersonnelModal())
+
+@bot.tree.command(name="dossier_intervention", description="Remplir un dossier d'intervention")
+async def dossier_intervention(interaction: discord.Interaction):
+    await interaction.response.send_modal(DossierInterventionModal())
 
 @bot.tree.command(name="triage", description="Outil de triage RP : zone du corps -> cas -> soins")
 async def triage(interaction: discord.Interaction):
@@ -444,23 +447,10 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 
-GUILD_ID = discord.Object(id=1527797628228735047)
-
-
-# ---------- INITIALISATION ET DÉMARRAGE ----------
-class MyBot(commands.Bot):
-    async def setup_hook(self):
-        # Synchronise toutes les commandes au niveau global
-        await self.tree.sync()
-        print("Commandes Slash synchronisées avec succès au niveau global !")
-
-intents = discord.Intents.default()
-intents.message_content = True
-
-bot = MyBot(command_prefix="!", intents=intents)
-
+# ---------- EVENEMENTS ----------
 @bot.event
 async def on_ready():
     print(f"Connecté en tant que {bot.user}")
 
 bot.run(TOKEN)
+
