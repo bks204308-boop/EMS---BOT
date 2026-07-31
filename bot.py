@@ -10,9 +10,6 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 intents = discord.Intents.default()
 intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-
 # ---------- FORMULAIRE : DOSSIER PERSONNEL ----------
 class DossierPersonnelModal(discord.ui.Modal, title="Dossier Personnel"):
     nom = discord.ui.TextInput(label="Nom complet", placeholder="Ex: Julien Moreau")
@@ -450,22 +447,20 @@ async def triage(interaction: discord.Interaction):
 GUILD_ID = discord.Object(id=1527797628228735047)
 
 
-@bot.event
-async def on_guild_join(guild: discord.Guild):
-    bot.tree.copy_global_to(guild=guild)
-    await bot.tree.sync(guild=guild)
-    print(f"Commandes synchronisées sur le nouveau serveur : {guild.name}")
+# ---------- INITIALISATION ET DÉMARRAGE ----------
+class MyBot(commands.Bot):
+    async def setup_hook(self):
+        # Synchronise toutes les commandes au niveau global
+        await self.tree.sync()
+        print("Commandes Slash synchronisées avec succès au niveau global !")
 
+intents = discord.Intents.default()
+intents.message_content = True
+
+bot = MyBot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync(guild=None)
-    for guild in bot.guilds:
-        bot.tree.copy_global_to(guild=guild)
-        await bot.tree.sync(guild=guild)
-        print(f"Commandes synchronisées sur : {guild.name}")
     print(f"Connecté en tant que {bot.user}")
-
 
 bot.run(TOKEN)
