@@ -811,7 +811,7 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 
-GUILD_ID = discord.Object(id=1527797628228735047)
+GUILD_ID = discord.Object(id=1531443088151543858)
 
 
 @bot.event
