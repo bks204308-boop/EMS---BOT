@@ -153,24 +153,51 @@ async def delete_dossier_personnel(user_id: int) -> bool:
 
 
 # ---------- EXPORT PDF ----------
+def clean_text_for_pdf(text: str) -> str:
+    """Nettoie le texte pour éviter les erreurs d'encodage FPDF (supprime émojis et caractères non-Latin1)"""
+    if not text:
+        return "Non renseigné"
+    # Remplacement des caractères courants qui posent problème
+    replacements = {
+        "€": "EUR",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+        "–": "-",
+        "—": "-",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    # Convertit en latin-1 en ignorant les émojis/caractères non pris en charge
+    return text.encode("latin-1", "ignore").decode("latin-1")
+
+
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
     pdf = FPDF()
     pdf.add_page()
+    
+    # Titre
     pdf.set_font("Helvetica", "B", 16)
-    pdf.multi_cell(0, 10, title)
+    pdf.multi_cell(0, 10, clean_text_for_pdf(title))
     pdf.ln(4)
-    pdf.set_font("Helvetica", "", 12)
+    
+    # Champs
     for label, value in fields:
         pdf.set_font("Helvetica", "B", 12)
-        pdf.multi_cell(0, 7, f"{label} :")
+        pdf.multi_cell(0, 7, clean_text_for_pdf(f"{label} :"))
         pdf.set_font("Helvetica", "", 12)
-        pdf.multi_cell(0, 7, value or "Non renseigné")
+        pdf.multi_cell(0, 7, clean_text_for_pdf(value or "Non renseigné"))
         pdf.ln(2)
+        
+    # Pied de page
     if footer:
         pdf.set_font("Helvetica", "I", 9)
         pdf.ln(4)
-        pdf.multi_cell(0, 5, footer)
-    buf = io.BytesIO(pdf.output())
+        pdf.multi_cell(0, 5, clean_text_for_pdf(footer))
+        
+    buf = io.BytesIO()
+    # fpdf2 permet d'écrire directement dans un buffer d'octets
+    pdf.output(buf)
     buf.seek(0)
     return buf
 
@@ -185,10 +212,18 @@ class ExportPDFView(discord.ui.View):
 
     @discord.ui.button(label="📄 Exporter en PDF", style=discord.ButtonStyle.secondary)
     async def export(self, interaction: discord.Interaction, button: discord.ui.Button):
-        buf = generate_pdf(self.title, self.fields, self.footer)
-        await interaction.response.send_message(
-            file=discord.File(buf, filename=self.filename), ephemeral=True
-        )
+        try:
+            buf = generate_pdf(self.title, self.fields, self.footer)
+            # Nettoyage du nom de fichier pour éviter les erreurs de pièces jointes Discord
+            clean_filename = clean_text_for_pdf(self.filename).replace(" ", "_")
+            await interaction.response.send_message(
+                file=discord.File(buf, filename=clean_filename), ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Erreur génération PDF : {e}")
+            await interaction.response.send_message(
+                "❌ Impossible de générer le fichier PDF.", ephemeral=True
+            )
 
 
 # ---------- FORMULAIRE : DOSSIER PERSONNEL ----------
