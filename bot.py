@@ -410,7 +410,7 @@ class ZoneView(discord.ui.View):
 
 
 # ---------- CONFIGURATION ET INITIALISATION DU BOT ----------
-GUILD_ID = discord.Object(id=1527797628228735047)  # Ton ID de serveur[span_0](start_span)[span_0](end_span)
+GUILD_ID = discord.Object(id=1531443088151543858)  # Ton ID de serveur[span_0](start_span)[span_0](end_span)
 
 class MedicalBot(commands.Bot):
     async def setup_hook(self):
