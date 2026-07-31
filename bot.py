@@ -19,7 +19,7 @@ class DossierPersonnelModal(discord.ui.Modal, title="Dossier Personnel"):
         required=False,
     )
     contact_urgence = discord.ui.TextInput(
-        label="Contact d'urgence", placeholder="Ex: Sophie Moreau - 06 98 76 54 32", required=False
+        label="Contact d'urgence", placeholder="Ex: Sophie Moreau - 555-1234", required=False
     )
 
     async def on_submit(self, interaction: discord.Interaction):
