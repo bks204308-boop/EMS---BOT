@@ -167,35 +167,42 @@ def clean_text_for_pdf(text: str) -> str:
 
 
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
-    pdf = FPDF()
+    # 1. Initialisation avec orientation portrait, millimètres, A4
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_margins(15, 15, 15)
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     
-    # Titre
+    # Largeur utile imprimable (Effective Page Width)
+    effective_width = pdf.epw 
+
+    # 2. Titre
     pdf.set_font("Helvetica", "B", 16)
-    pdf.multi_cell(0, 10, clean_text_for_pdf(title))
+    pdf.multi_cell(w=effective_width, h=10, txt=clean_text_for_pdf(title))
     pdf.ln(4)
     
-    # Champs
+    # 3. Champs
     for label, value in fields:
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.multi_cell(0, 7, clean_text_for_pdf(f"{label} :"))
-        pdf.set_font("Helvetica", "", 12)
-        pdf.multi_cell(0, 7, clean_text_for_pdf(value or "Non renseigne"))
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.multi_cell(w=effective_width, h=6, txt=clean_text_for_pdf(f"{label} :"))
+        pdf.set_font("Helvetica", "", 11)
+        pdf.multi_cell(w=effective_width, h=6, txt=clean_text_for_pdf(value or "Non renseigne"))
         pdf.ln(2)
         
-    # Pied de page
+    # 4. Pied de page
     if footer:
         pdf.set_font("Helvetica", "I", 9)
         pdf.ln(4)
-        pdf.multi_cell(0, 5, clean_text_for_pdf(footer))
+        pdf.multi_cell(w=effective_width, h=5, txt=clean_text_for_pdf(footer))
         
-    # Conversion securisee en octets
+    # 5. Conversion en octets
     out = pdf.output()
     pdf_bytes = bytes(out) if isinstance(out, (bytearray, bytes)) else str(out).encode("latin-1")
     
     buf = io.BytesIO(pdf_bytes)
     buf.seek(0)
     return buf
+
 
 
 class ExportPDFView(discord.ui.View):
