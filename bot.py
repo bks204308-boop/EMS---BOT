@@ -156,14 +156,21 @@ async def delete_dossier_personnel(user_id: int) -> bool:
 def clean_text_for_pdf(text: str) -> str:
     if not text:
         return "Non renseigne"
+    
+    # On remplace uniquement les symboles non geres par la police de base
     replacements = {
-        "€": "$", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-",
-        "é": "e", "è": "e", "ê": "e", "ë": "e", "à": "a", "â": "a",
-        "ù": "u", "û": "u", "î": "i", "ï": "i", "ô": "o", "ç": "c"
+        "€": "$",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+        "–": "-",
+        "—": "-",
     }
     for old, new in replacements.items():
         text = str(text).replace(old, new)
-    return text.encode("ascii", "ignore").decode("ascii")
+        
+    # Convertit en latin-1 pour conserver é, è, ê, à, ç, etc. sans faire planter FPDF
+    return text.encode("latin-1", "ignore").decode("latin-1")
 
 
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
