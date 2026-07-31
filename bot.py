@@ -167,73 +167,73 @@ def clean_text_for_pdf(text: str) -> str:
 
 
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
-    # 1. Configuration de la page A4 avec marges ajustées
+    # 1. Configuration de la page A4 avec marges fixes
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.set_margins(15, 15, 15)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     
-    w = pdf.epw  # Largeur utile (180 mm)
+    # Largeur utile imprimable (180 mm)
+    w = pdf.epw 
 
-    # 2. EN-TÊTE MÉDICAL (Bandeau de titre)
-    # Fond bleu foncé
+    # 2. EN-TÊTE MÉDICAL
     pdf.set_fill_color(24, 76, 120) 
     pdf.rect(15, 15, w, 22, style="F")
     
-    # Texte de l'en-tête (en blanc)
-    pdf.set_font("Helvetica", "B", 15)
+    pdf.set_font("Helvetica", "B", 14)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_xy(18, 19)
+    pdf.set_xy(18, 18)
     pdf.cell(w - 6, 8, txt=clean_text_for_pdf(title.upper()), align="L")
     
-    pdf.set_font("Helvetica", "I", 9)
-    pdf.set_xy(18, 27)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_xy(18, 26)
     pdf.cell(w - 6, 5, txt="SERVICE MEDICAL D'URGENCE - RAPPORT OFFICIEL", align="L")
     
-    pdf.ln(12)
-    pdf.set_text_color(0, 0, 0) # Remise du texte en noir
+    pdf.ln(14)
+    pdf.set_text_color(0, 0, 0)
 
     # 3. DATE DU DOCUMENT
     now_str = datetime.now(timezone.utc).strftime("%d/%m/%Y a %H:%M UTC")
-    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(100, 100, 100)
     pdf.cell(w, 5, txt=clean_text_for_pdf(f"Edite le : {now_str}"), align="R", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(3)
+    pdf.ln(2)
     pdf.set_text_color(0, 0, 0)
 
-    # 4. BLOCS D'INFORMATIONS (Tableau / Fiches)
+    # 4. BLOCS D'INFORMATIONS
     for label, value in fields:
-        # Intitulé / Champ (Fond gris clair + bordure bleue)
+        # Intitulé / Champ (Fond bleu clair)
         pdf.set_fill_color(235, 242, 250)
         pdf.set_draw_color(180, 205, 225)
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(24, 76, 120)
         
-        # Petit rectangle pour la catégorie
-        pdf.multi_cell(w=w, h=7, txt=clean_text_for_pdf(f"  {label.upper()}"), border=1, fill=True, align="L")
+        # On utilise une cellule avec padding propre pour ne pas déborder
+        pdf.cell(w, 7, txt=clean_text_for_pdf(f"  {label.upper()}"), border=1, fill=True, new_x="LMARGIN", new_y="NEXT")
         
-        # Valeur / Contenu (Fond blanc + bordure légère)
+        # Valeur / Contenu (Fond blanc)
         pdf.set_fill_color(255, 255, 255)
         pdf.set_draw_color(220, 220, 220)
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(30, 30, 30)
         
         val_text = clean_text_for_pdf(value or "Non renseigne")
-        # Ajout d'une marge interne artificielle
-        pdf.multi_cell(w=w, h=6, txt=f" {val_text}", border=1, fill=True, align="L")
+        
+        # multi_cell pour gérer le texte long sur plusieurs lignes sans dépasser
+        pdf.multi_cell(w=w, h=6, txt=val_text, border=1, fill=True, align="L")
         pdf.ln(3)
 
     # 5. PIED DE PAGE & SIGNATURE
     if footer:
-        pdf.ln(6)
+        pdf.ln(4)
         pdf.set_draw_color(24, 76, 120)
-        pdf.line(15, pdf.get_y(), 15 + w, pdf.get_y()) # Ligne de séparation
+        pdf.line(15, pdf.get_y(), 15 + w, pdf.get_y())
         pdf.ln(3)
         
-        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_font("Helvetica", "I", 8)
         pdf.set_text_color(100, 100, 100)
-        pdf.multi_cell(w=w, h=5, txt=clean_text_for_pdf(f"Unite d'intervention : {footer}"), align="L")
-        pdf.cell(w, 5, txt="Document valide par les services de sante RP", align="R")
+        pdf.multi_cell(w=w, h=4, txt=clean_text_for_pdf(f"Unite d'intervention : {footer}"), align="L")
+        pdf.cell(w, 4, txt="Document valide par les services de sante RP", align="R")
 
     # 6. EXPORT
     out = pdf.output()
@@ -242,8 +242,6 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
     buf = io.BytesIO(pdf_bytes)
     buf.seek(0)
     return buf
-
-
 
 
 class ExportPDFView(discord.ui.View):
