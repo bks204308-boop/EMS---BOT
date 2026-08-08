@@ -477,7 +477,7 @@ async def dossier_supprimer_personnel(interaction: discord.Interaction, joueur: 
 
 # ---------- FACTURATION DES SOINS ----------
 # NB: Morphine et Loprazolam n'avaient pas de prix fixe indiqué dans la grille fournie
-# (tarif à définir selon la dose/procédure) -> mis à 0€, à ajuster manuellement si besoin.
+# (tarif à définir selon la dose/procédure) -> mis à 0$, à ajuster manuellement si besoin.
 FACTURATION_CATEGORIES = {
     "urgence": {
         "label": "Services généraux et d'urgence",
@@ -572,7 +572,7 @@ def build_facturation_embed(session: FacturationSession, note: Optional[str] = N
         embed.add_field(
             name="Soins ajoutés", value="\n".join(f"• {d}" for d in session.details), inline=False
         )
-        embed.add_field(name="Total provisoire", value=f"**{session.total} €**", inline=False)
+        embed.add_field(name="Total provisoire", value=f"**{session.total} $**", inline=False)
     else:
         embed.description = "Aucun soin ajouté pour le moment."
     if note:
@@ -609,7 +609,7 @@ class FacturationItemSelect(discord.ui.Select):
         self.cat_key = cat_key
         items = FACTURATION_CATEGORIES[cat_key]["items"]
         options = [
-            discord.SelectOption(label=f"{v['label']} — {v['prix']} €"[:100], value=k)
+            discord.SelectOption(label=f"{v['label']} — {v['prix']} $"[:100], value=k)
             for k, v in items.items()
         ]
         super().__init__(
@@ -624,7 +624,7 @@ class FacturationItemSelect(discord.ui.Select):
         for key in self.values:
             item = items[key]
             self.session.total += item["prix"]
-            self.session.details.append(f"{item['label']} — {item['prix']} €")
+            self.session.details.append(f"{item['label']} — {item['prix']} $")
         embed = build_facturation_embed(self.session)
         view = FacturationSummaryView(self.session)
         await interaction.response.edit_message(embed=embed, view=view)
@@ -682,7 +682,7 @@ class FacturationSummaryView(SafeView):
 
         pdf_view = ExportPDFView(
             title="Facturation des soins",
-            fields=[("Soins effectués", detail_text), ("Total", f"{self.session.total} €")],
+            fields=[("Soins effectués", detail_text), ("Total", f"{self.session.total} $")],
             filename=f"facturation_{record_id}.pdf",
             footer=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}",
         )
