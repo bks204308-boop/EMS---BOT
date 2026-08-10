@@ -851,12 +851,12 @@ async def dossier_medical_creer(interaction: discord.Interaction):
     await interaction.response.send_modal(DossierMedicalModal())
 
 
-@bot.tree.command(name="dossier_medical_modifier", description="Modifier un dossier médical existant")
+@bot.tree.command(name="modif_dossier", description="Modifier un dossier médical existant")
 async def dossier_medical_modifier(interaction: discord.Interaction):
     await interaction.response.send_modal(DossierMedicalModifierModal())
 
 
-@bot.tree.command(name="dossier_intervention", description="Créer un rapport d'intervention EMS")
+@bot.tree.command(name="rapport_ems", description="Créer un rapport d'intervention EMS")
 @app_commands.describe(patient="Nom du patient (optionnel)")
 async def dossier_intervention(interaction: discord.Interaction, patient: Optional[str] = None):
     await interaction.response.send_modal(RapportInterventionModal(patient_name=patient))
