@@ -846,6 +846,7 @@ async def facturation(interaction: discord.Interaction, patient: str):
 
 
 # ---------- COMMANDES SLASH ----------
+# 
 @bot.tree.command(name="dossier_medical_creer", description="Créer un dossier médical complet (visite standard)")
 async def dossier_medical_creer(interaction: discord.Interaction):
     await interaction.response.send_modal(DossierMedicalModal())
