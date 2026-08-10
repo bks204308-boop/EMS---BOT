@@ -18,7 +18,6 @@ DB_PATH = os.getenv("BOT_DB_PATH", "bot_data.db")
 logger = logging.getLogger("rp_medical_bot")
 logging.basicConfig(level=logging.INFO)
 
-# CONFIGURATION DES INTENTS (Nécessaire pour que Discord accepte le bot)
 intents = discord.Intents.default()
 intents.message_content = True
 
@@ -847,7 +846,7 @@ async def facturation(interaction: discord.Interaction, patient: str):
 
 
 # ---------- COMMANDES SLASH ----------
-@bot.tree.command(name="dossier_medical_creer", description="Créer un dossier médical complet (visite standard)")
+@bot.tree.command(name="dossier_med", description="Créer un dossier médical complet (visite standard)")
 async def dossier_medical_creer(interaction: discord.Interaction):
     await interaction.response.send_modal(DossierMedicalModal())
 
@@ -1182,14 +1181,14 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 
-# ---------- DÉMARRAGE ET SYNCHRONISATION FORCÉE ----------
+# ---------- DÉMARRAGE ----------
 @bot.event
 async def on_ready():
     await init_db()
     logger.info(f"Connecté en tant que {bot.user}")
     
     try:
-        # Synchronisation forcée sur ton serveur spécifique
+        # Synchronisation forcée sur le serveur spécifique
         guild = bot.get_guild(1531443088151543858)
         if guild:
             bot.tree.copy_global_to(guild=guild)
