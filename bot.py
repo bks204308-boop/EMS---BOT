@@ -617,8 +617,11 @@ FACTURATION_CATEGORIES = {
             "reanimation_dangereuse": {"label": "Réanimation en zone dangereuse", "prix": 10000},
         },
     },
-    "transport": {
-        "label": "🚑 Transport médical",
-        "items": {
-            "transport_hôpital": {"label": "Transport vers hôpital", "prix": 2200},
-            "transport_longue_distance": {"label": "Transport longue distance",
+   "transport": {
+    "label": "🚑 Transport médical",
+    "items": {
+        "transport_hôpital": {"label": "Transport vers hôpital", "prix": 2200},
+        "transport_longue_distance": {"label": "Transport longue distance", "prix": 2400},
+        "escorte_medicale": {"label": "Escorte médicale (convoi, VIP, etc.)", "prix": 2700},
+    }
+},
