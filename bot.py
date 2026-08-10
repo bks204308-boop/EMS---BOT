@@ -591,6 +591,7 @@ class RapportInterventionModal(discord.ui.Modal, title="Rapport d'Intervention E
 
 # ---------- FACTURATION ----------
 FACTURATION_CATEGORIES = {
+FACTURATION_CATEGORIES = {
     "soins_base": {
         "label": "💉 Soins de base",
         "items": {
