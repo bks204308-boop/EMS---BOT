@@ -18,6 +18,7 @@ DB_PATH = os.getenv("BOT_DB_PATH", "bot_data.db")
 logger = logging.getLogger("rp_medical_bot")
 logging.basicConfig(level=logging.INFO)
 
+# CONFIGURATION DES INTENTS (Nécessaire pour que Discord accepte le bot)
 intents = discord.Intents.default()
 intents.message_content = True
 
@@ -220,7 +221,7 @@ class ExportPDFView(SafeView):
         )
 
 
-# ---------- FORMULAIRE : DOSSIER MÉDICAL (VISITE STANDARD) ----------
+# ---------- FORMULAIRE : DOSSIER MÉDICAL ----------
 class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical - Visite Standard"):
     nom = discord.ui.TextInput(label="Nom & prénom", placeholder="Ex: Jean Dupont")
     age = discord.ui.TextInput(label="Âge", placeholder="Ex: 45")
@@ -353,7 +354,7 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical - Visite Sta
         await interaction.response.send_message(embed=embed, view=view)
 
 
-# ---------- FORMULAIRE : MODIFICATION DOSSIER MÉDICAL ----------
+# ---------- FORMULAIRE : MODIFICATION ----------
 class DossierMedicalModifierModal(discord.ui.Modal, title="Modification Dossier Médical"):
     ancien_nom = discord.ui.TextInput(label="Ancien Nom & prénom", placeholder="Nom actuel dans le dossier", required=True)
     nouveau_nom = discord.ui.TextInput(label="Nouveau Nom & prénom", placeholder="Nouveau nom", required=False)
@@ -439,7 +440,7 @@ class DossierMedicalModifierModal(discord.ui.Modal, title="Modification Dossier 
         await interaction.response.send_message(embed=embed)
 
 
-# ---------- FORMULAIRE : RAPPORT D'INTERVENTION EMS ----------
+# ---------- FORMULAIRE : RAPPORT INTERVENTION EMS ----------
 class RapportInterventionModal(discord.ui.Modal, title="Rapport d'Intervention EMS"):
     date = discord.ui.TextInput(label="Date", placeholder="JJ/MM/AAAA")
     heure_appel = discord.ui.TextInput(label="Heure d'appel", placeholder="HH:MM")
@@ -1181,45 +1182,26 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 
-# ---------- SYNC & ERREURS ----------
+# ---------- DÉMARRAGE ET SYNCHRONISATION FORCÉE ----------
 @bot.event
 async def on_ready():
     await init_db()
     logger.info(f"Connecté en tant que {bot.user}")
     
-    # On vide et on resynchronise TOUTES les commandes pour enlever le bug 50035
     try:
-        bot.tree.clear_commands(guild=None)
-        await bot.tree.sync(guild=None)
-        
-        for guild in bot.guilds:
+        # Synchronisation forcée sur ton serveur spécifique
+        guild = bot.get_guild(1531443088151543858)
+        if guild:
             bot.tree.copy_global_to(guild=guild)
             await bot.tree.sync(guild=guild)
-            logger.info(f"Commandes réinitialisées sur : {guild.name}")
-            
-        logger.info("✅ Toutes les commandes ont été nettoyées et resynchronisées avec succès.")
-    except Exception as e:
-        logger.error(f"Erreur lors du sync : {e}")
-
-
-@bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    # On ignore silencieusement l'erreur 50035 si elle remonte
-    if "50035" in str(error):
-        logger.warning("Erreur 50035 ignorée silencieusement.")
-        return
-
-    # Pour toutes les autres erreurs, on log et on prévient l'utilisateur
-    logger.error("Erreur : %s", error)
-    traceback.print_exception(type(error), error, error.__traceback__)
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send("Une erreur est survenue.", ephemeral=True)
+            logger.info(f"✅ Commandes synchronisées sur le serveur : {guild.name}")
+            print(f"✅ Commandes synchronisées sur le serveur : {guild.name}")
         else:
-            await interaction.response.send_message("Une erreur est survenue.", ephemeral=True)
-    except discord.HTTPException:
-        pass
-
+            logger.warning("⚠️ Le bot n'a pas trouvé le serveur avec l'ID 1531443088151543858. Vérifie que le bot est bien invité sur le serveur.")
+            
+        logger.info("✅ Démarrage terminé.")
+    except Exception as e:
+        logger.error(f"❌ Erreur critique lors du sync : {e}")
 
 if __name__ == "__main__":
     bot.run(TOKEN)
