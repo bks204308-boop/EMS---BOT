@@ -846,7 +846,6 @@ async def facturation(interaction: discord.Interaction, patient: str):
 
 
 # ---------- COMMANDES SLASH ----------
-# 
 @bot.tree.command(name="dossier_medical_creer", description="Créer un dossier médical complet (visite standard)")
 async def dossier_medical_creer(interaction: discord.Interaction):
     await interaction.response.send_modal(DossierMedicalModal())
@@ -1182,29 +1181,35 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 
-# ---------- SYNC ----------
+# ---------- SYNC & ERREURS ----------
 @bot.event
 async def on_ready():
     await init_db()
-    for guild in bot.guilds:
-        bot.tree.copy_global_to(guild=guild)
-        await bot.tree.sync(guild=guild)
-        logger.info(f"Commandes synchronisées sur : {guild.name}")
-
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync(guild=None)
     logger.info(f"Connecté en tant que {bot.user}")
-
-
-@bot.event
-async def on_guild_join(guild: discord.Guild):
-    bot.tree.copy_global_to(guild=guild)
-    await bot.tree.sync(guild=guild)
-    logger.info(f"Commandes synchronisées sur le nouveau serveur : {guild.name}")
+    
+    # On vide et on resynchronise TOUTES les commandes pour enlever le bug 50035
+    try:
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync(guild=None)
+        
+        for guild in bot.guilds:
+            bot.tree.copy_global_to(guild=guild)
+            await bot.tree.sync(guild=guild)
+            logger.info(f"Commandes réinitialisées sur : {guild.name}")
+            
+        logger.info("✅ Toutes les commandes ont été nettoyées et resynchronisées avec succès.")
+    except Exception as e:
+        logger.error(f"Erreur lors du sync : {e}")
 
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    # On ignore silencieusement l'erreur 50035 si elle remonte
+    if "50035" in str(error):
+        logger.warning("Erreur 50035 ignorée silencieusement.")
+        return
+
+    # Pour toutes les autres erreurs, on log et on prévient l'utilisateur
     logger.error("Erreur : %s", error)
     traceback.print_exception(type(error), error, error.__traceback__)
     try:
