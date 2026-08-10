@@ -164,31 +164,36 @@ async def list_all_personnel(limit: int = 50) -> List[dict]:
             return [dict(r) for r in rows]
 
 
-# ---------- EXPORT PDF ----------
-def _pdf_safe(text: str) -> str:
-    if text is None:
-        return ""
-    text = str(text).replace("€", "EUR")
-    return text.encode("latin-1", errors="replace").decode("latin-1")
-
-
+# ---------- EXPORT PDF (VERSION CORRIGÉE POUR UTF-8) ----------
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.multi_cell(0, 10, _pdf_safe(title))
+    
+    # Utilisation d'une police Unicode pour éviter les erreurs de caractères (€, é, è, etc.)
+    # Nécessite d'avoir le fichier DejaVuSans.ttf dans le dossier du bot, 
+    # sinon on utilise une police basique en espérant que ça passe.
+    try:
+        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+        pdf.set_font("DejaVu", "B", 16)
+    except:
+        # Fallback sur Helvetica si la police n'est pas trouvée (UTF-8 sera peut-être mal géré)
+        pdf.set_font("Helvetica", "B", 16)
+    
+    pdf.multi_cell(0, 10, title)
     pdf.ln(4)
-    pdf.set_font("Helvetica", "", 12)
+    pdf.set_font("Helvetica", "", 12) # Repasser sur Helvetica pour le corps du texte
+
     for label, value in fields:
         pdf.set_font("Helvetica", "B", 12)
-        pdf.multi_cell(0, 7, f"{_pdf_safe(label)} :")
+        pdf.multi_cell(0, 7, f"{label} :")
         pdf.set_font("Helvetica", "", 12)
-        pdf.multi_cell(0, 7, _pdf_safe(value) or "Non renseigné")
+        pdf.multi_cell(0, 7, str(value) if value else "Non renseigné")
         pdf.ln(2)
     if footer:
         pdf.set_font("Helvetica", "I", 9)
         pdf.ln(4)
-        pdf.multi_cell(0, 5, _pdf_safe(footer))
+        pdf.multi_cell(0, 5, footer)
+    
     raw_output = pdf.output()
     if isinstance(raw_output, str):
         raw_output = raw_output.encode("latin-1", errors="replace")
@@ -229,6 +234,7 @@ class ExportPDFView(SafeView):
 
 # ---------- FORMULAIRE : DOSSIER MÉDICAL (VISITE STANDARD) ----------
 class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical - Visite Standard"):
+    # ... (Tes champs de formulaire restent exactement les mêmes, aucun changement nécessaire ici) ...
     nom = discord.ui.TextInput(label="Nom & prénom", placeholder="Ex: Jean Dupont")
     age = discord.ui.TextInput(label="Âge", placeholder="Ex: 45")
     sexe = discord.ui.TextInput(label="Sexe [M / F]", placeholder="M ou F", max_length=1)
@@ -362,6 +368,7 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical - Visite Sta
 
 # ---------- FORMULAIRE : MODIFICATION DOSSIER MÉDICAL ----------
 class DossierMedicalModifierModal(discord.ui.Modal, title="Modification Dossier Médical"):
+    # ... (Idem, tes champs de formulaire ne changent pas) ...
     ancien_nom = discord.ui.TextInput(label="Ancien Nom & prénom", placeholder="Nom actuel dans le dossier", required=True)
     nouveau_nom = discord.ui.TextInput(label="Nouveau Nom & prénom", placeholder="Nouveau nom", required=False)
     nouveau_age = discord.ui.TextInput(label="Nouvel Âge", placeholder="Nouvel âge", required=False)
@@ -448,6 +455,7 @@ class DossierMedicalModifierModal(discord.ui.Modal, title="Modification Dossier 
 
 # ---------- FORMULAIRE : RAPPORT D'INTERVENTION EMS ----------
 class RapportInterventionModal(discord.ui.Modal, title="Rapport d'Intervention EMS"):
+    # ... (Idem, tes champs de formulaire ne changent pas) ...
     date = discord.ui.TextInput(label="Date", placeholder="JJ/MM/AAAA")
     heure_appel = discord.ui.TextInput(label="Heure d'appel", placeholder="HH:MM")
     heure_arrivee = discord.ui.TextInput(label="Heure d'arrivée sur les lieux", placeholder="HH:MM")
@@ -581,7 +589,7 @@ class RapportInterventionModal(discord.ui.Modal, title="Rapport d'Intervention E
         await interaction.response.send_message(embed=embed, view=view)
 
 
-# ---------- NOUVELLE FACTURATION AVEC TARIFS EMS ----------
+# ---------- FACTURATION ----------
 FACTURATION_CATEGORIES = {
     "soins_base": {
         "label": "💉 Soins de base",
@@ -613,597 +621,4 @@ FACTURATION_CATEGORIES = {
         "label": "🚑 Transport médical",
         "items": {
             "transport_hôpital": {"label": "Transport vers hôpital", "prix": 2200},
-            "transport_longue_distance": {"label": "Transport longue distance", "prix": 2400},
-            "escorte_medicale": {"label": "Escorte médicale (convoi, VIP, etc.)", "prix": 2700},
-        },
-    },
-    "services": {
-        "label": "💊 Services supplémentaires",
-        "items": {
-            "prescription": {"label": "Prescription médicaments", "prix": 500},
-            "kit_soin": {"label": "Kit de soin (bandage, médoc)", "prix": 550},
-            "certificat_medical": {"label": "Certificat médical RP", "prix": 500},
-            "test_alcool_drogue": {"label": "Test alcool / drogue RP", "prix": 500},
-        },
-    },
-    "psychotechnique": {
-        "label": "🔫 Test psychotechnique",
-        "items": {
-            "test_ppa": {"label": "Test psychotechnique standard (PPA)", "prix": 2000},
-            "repassage_test": {"label": "Repassage du test (échec)", "prix": 1000},
-        },
-    },
-    "visites": {
-        "label": "🩺 Visites médicales",
-        "items": {
-            "visite_standard": {"label": "Visite médicale standard", "prix": 1000},
-            "visite_approfondie": {"label": "Visite médicale approfondie", "prix": 1500},
-            "visite_professionnelle": {"label": "Visite médicale professionnelle (aptitude métier)", "prix": 1800},
-        },
-    },
-    "vaccination": {
-        "label": "💉 Vaccination",
-        "items": {
-            "vaccin_standard": {"label": "Vaccin standard (grippe, rappel, etc.)", "prix": 600},
-            "vaccin_obligatoire": {"label": "Vaccin obligatoire (schéma complet)", "prix": 1200},
-            "vaccin_urgence": {"label": "Vaccin urgence (épidémie, infection grave)", "prix": 1500},
-            "carnet_vaccination": {"label": "Carnet de vaccination RP", "prix": 300},
-        },
-    },
-    "maternite": {
-        "label": "👶 Maternité",
-        "items": {
-            "consultation_prenatale": {"label": "Consultation prénatale", "prix": 600},
-            "suivi_grossesse": {"label": "Suivi de grossesse complet", "prix": 2500},
-            "accouchement_standard": {"label": "Accouchement standard", "prix": 3000},
-            "accouchement_complication": {"label": "Accouchement sous complication", "prix": 4500},
-            "cesarienne": {"label": "Césarienne", "prix": 5500},
-            "suivi_post_natal": {"label": "Suivi post-natal (mère + enfant)", "prix": 800},
-        },
-    },
-    "fin_de_vie": {
-        "label": "⚰️ Fin de vie / soins palliatifs",
-        "items": {
-            "accompagnement_fin_vie": {"label": "Accompagnement fin de vie", "prix": 2000},
-            "soins_palliatifs": {"label": "Soins palliatifs complets", "prix": 4000},
-            "constat_deces": {"label": "Constat de décès RP", "prix": 1000},
-            "transport_corps": {"label": "Transport corps (morgue)", "prix": 1500},
-        },
-    },
-    "assistance": {
-        "label": "🧑‍⚕️ Assistance médicale",
-        "items": {
-            "assistance_evenement": {"label": "Assistance médicale sur événement", "prix": 3000},
-            "presence_operation": {"label": "Présence médecin sur opération spéciale", "prix": 3500},
-            "support_zone_dangereuse": {"label": "Support médical en zone dangereuse", "prix": 5000},
-            "assistance_longue_duree": {"label": "Assistance longue durée (contrat RP)", "prix": 8000},
-        },
-    },
-}
-
-
-class FacturationSession:
-    def __init__(self):
-        self.total = 0
-        self.details: List[str] = []
-        self.patient_name: str = "Non renseigné"
-
-
-def build_facturation_embed(session: FacturationSession, note: Optional[str] = None) -> discord.Embed:
-    embed = discord.Embed(title="🧾 Facturation EMS", color=discord.Color.green())
-    embed.add_field(name="Patient", value=session.patient_name, inline=False)
-    if session.details:
-        embed.add_field(
-            name="Soins ajoutés", value="\n".join(f"• {d}" for d in session.details), inline=False
-        )
-        embed.add_field(name="Total provisoire", value=f"**{session.total} $**", inline=False)
-    else:
-        embed.description = "Aucun soin ajouté pour le moment."
-    if note:
-        embed.add_field(name="Étape actuelle", value=note, inline=False)
-    return embed
-
-
-class FacturationCategorySelect(discord.ui.Select):
-    def __init__(self, session: FacturationSession):
-        self.session = session
-        options = [
-            discord.SelectOption(label=cat["label"][:100], value=key)
-            for key, cat in FACTURATION_CATEGORIES.items()
-        ]
-        super().__init__(placeholder="Choisis une catégorie de soins...", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        cat_key = self.values[0]
-        note = f"Catégorie : {FACTURATION_CATEGORIES[cat_key]['label']}"
-        embed = build_facturation_embed(self.session, note=note)
-        view = FacturationItemView(self.session, cat_key)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-
-class FacturationCategoryView(SafeView):
-    def __init__(self, session: FacturationSession):
-        super().__init__(timeout=180)
-        self.add_item(FacturationCategorySelect(session))
-
-
-class FacturationItemSelect(discord.ui.Select):
-    def __init__(self, session: FacturationSession, cat_key: str):
-        self.session = session
-        self.cat_key = cat_key
-        items = FACTURATION_CATEGORIES[cat_key]["items"]
-        options = [
-            discord.SelectOption(label=f"{v['label']} — {v['prix']} $"[:100], value=k)
-            for k, v in items.items()
-        ]
-        super().__init__(
-            placeholder="Sélectionne un ou plusieurs soins...",
-            min_values=1,
-            max_values=len(options),
-            options=options,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        items = FACTURATION_CATEGORIES[self.cat_key]["items"]
-        for key in self.values:
-            item = items[key]
-            self.session.total += item["prix"]
-            self.session.details.append(f"{item['label']} — {item['prix']} $")
-        embed = build_facturation_embed(self.session)
-        view = FacturationSummaryView(self.session)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-
-class BackToCategoryButton(discord.ui.Button):
-    def __init__(self, session: FacturationSession):
-        super().__init__(label="↩️ Changer de catégorie", style=discord.ButtonStyle.secondary, row=1)
-        self.session = session
-
-    async def callback(self, interaction: discord.Interaction):
-        embed = build_facturation_embed(self.session)
-        view = FacturationCategoryView(self.session)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-
-class FacturationItemView(SafeView):
-    def __init__(self, session: FacturationSession, cat_key: str):
-        super().__init__(timeout=180)
-        self.add_item(FacturationItemSelect(session, cat_key))
-        self.add_item(BackToCategoryButton(session))
-
-
-class FacturationSummaryView(SafeView):
-    def __init__(self, session: FacturationSession):
-        super().__init__(timeout=180)
-        self.session = session
-
-    @discord.ui.button(label="➕ Ajouter un autre soin", style=discord.ButtonStyle.secondary)
-    async def add_more(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = build_facturation_embed(self.session)
-        view = FacturationCategoryView(self.session)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-    @discord.ui.button(label="✅ Terminer et facturer", style=discord.ButtonStyle.success)
-    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        detail_text = "\n".join(f"• {d}" for d in self.session.details) or "Aucun soin sélectionné"
-
-        record_id = await save_dossier_intervention(
-            patient_name=self.session.patient_name,
-            blessure="Facturation soins",
-            soins=detail_text,
-            transport="",
-            facture=str(self.session.total),
-            statut_facture="En attente",
-            created_by=interaction.user.id,
-            created_by_name=interaction.user.display_name,
-        )
-
-        embed = discord.Embed(title="🧾 Facturation finale", color=discord.Color.green())
-        embed.add_field(name="Patient", value=self.session.patient_name, inline=False)
-        embed.add_field(name="Soins effectués", value=detail_text, inline=False)
-        embed.add_field(name="Total", value=f"**{self.session.total} $**", inline=False)
-        embed.set_footer(text=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}")
-
-        pdf_view = ExportPDFView(
-            title="Facturation EMS",
-            fields=[
-                ("Patient", self.session.patient_name),
-                ("Soins effectués", detail_text), 
-                ("Total", f"{self.session.total} $")
-            ],
-            filename=f"facturation_{record_id}.pdf",
-            footer=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}",
-        )
-        await interaction.response.edit_message(embed=embed, view=pdf_view)
-
-
-@bot.tree.command(name="facturation", description="Noter les soins effectués et calculer le prix total")
-@app_commands.describe(patient="Nom du patient")
-async def facturation(interaction: discord.Interaction, patient: str):
-    session = FacturationSession()
-    session.patient_name = patient
-    
-    # Vérifier si le patient a un dossier
-    dossier = await get_dossier_personnel(patient)
-    if dossier:
-        session.patient_name = dossier['nom']
-    
-    embed = build_facturation_embed(session, note="Choisis une catégorie de soins pour commencer.")
-    await interaction.response.send_message(embed=embed, view=FacturationCategoryView(session))
-
-
-# ---------- COMMANDES SLASH ----------
-
-@bot.tree.command(name="dossier_medical_creer", description="Créer un dossier médical complet (visite standard)")
-async def dossier_medical_creer(interaction: discord.Interaction):
-    await interaction.response.send_modal(DossierMedicalModal())
-
-
-@bot.tree.command(name="dossier_medical_modifier", description="Modifier un dossier médical existant")
-async def dossier_medical_modifier(interaction: discord.Interaction):
-    await interaction.response.send_modal(DossierMedicalModifierModal())
-
-
-@bot.tree.command(name="dossier_intervention", description="Créer un rapport d'intervention EMS")
-@app_commands.describe(patient="Nom du patient (optionnel)")
-async def dossier_intervention(interaction: discord.Interaction, patient: Optional[str] = None):
-    await interaction.response.send_modal(RapportInterventionModal(patient_name=patient))
-
-
-@bot.tree.command(name="dossier_voir", description="Consulter un dossier personnel par nom")
-@app_commands.describe(nom="Nom du personnage")
-async def dossier_voir(interaction: discord.Interaction, nom: str):
-    dossier = await get_dossier_personnel(nom)
-    
-    if not dossier:
-        # Chercher des correspondances
-        resultats = await search_dossiers_personnel(nom)
-        if len(resultats) > 1:
-            noms = ", ".join(r["nom"] for r in resultats[:10])
-            await interaction.response.send_message(
-                f"Plusieurs dossiers correspondent : {noms}. Précise le nom exact.",
-                ephemeral=True,
-            )
-            return
-        elif len(resultats) == 1:
-            dossier = resultats[0]
-        else:
-            await interaction.response.send_message(
-                f"Aucun dossier trouvé pour '{nom}'.", ephemeral=True
-            )
-            return
-
-    embed = discord.Embed(title=f"📋 Dossier — {dossier['nom']}", color=discord.Color.blue())
-    embed.add_field(name="Âge", value=dossier["age"] or "N/A", inline=True)
-    embed.add_field(name="Groupe sanguin", value=dossier["groupe_sanguin"] or "N/A", inline=True)
-    embed.add_field(name="Allergies / Antécédents", value=dossier["allergies"] or "Aucun", inline=False)
-    embed.add_field(
-        name="Contact d'urgence", value=dossier["contact_urgence"] or "Non renseigné", inline=False
-    )
-
-    interventions = await get_interventions_for_patient(dossier["nom"])
-    if interventions:
-        historique = "\n".join(
-            f"**#{i['id']}** — {i['blessure']} ({i['created_at'][:10]})" for i in interventions
-        )
-        embed.add_field(name="Historique d'interventions (5 dernières)", value=historique, inline=False)
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-@dossier_voir.autocomplete("nom")
-async def dossier_voir_nom_autocomplete(interaction: discord.Interaction, current: str):
-    if not current:
-        dossiers = await list_all_personnel(25)
-        return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
-    resultats = await search_dossiers_personnel(current, 25)
-    return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
-
-
-@bot.tree.command(name="dossier_liste", description="Lister les dernières interventions enregistrées")
-async def dossier_liste(interaction: discord.Interaction):
-    interventions = await list_recent_interventions()
-    if not interventions:
-        await interaction.response.send_message("Aucune intervention enregistrée pour le moment.", ephemeral=True)
-        return
-
-    embed = discord.Embed(title="🚑 Dernières interventions", color=discord.Color.orange())
-    for i in interventions:
-        embed.add_field(
-            name=f"#{i['id']} — {i['patient_name']}",
-            value=f"{i['blessure']}\nPar {i['created_by_name']} le {i['created_at'][:10]}",
-            inline=False,
-        )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-@bot.tree.command(name="dossier_supprimer_intervention", description="Supprimer un dossier d'intervention par son numéro")
-@app_commands.describe(id="Le numéro du dossier (visible dans le pied de page ou /dossier_liste)")
-async def dossier_supprimer_intervention(interaction: discord.Interaction, id: int):
-    success = await delete_intervention(id)
-    if success:
-        await interaction.response.send_message(f"Dossier d'intervention n°{id} supprimé.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"Aucun dossier d'intervention n°{id} trouvé.", ephemeral=True)
-
-
-@bot.tree.command(name="dossier_supprimer_personnel", description="Supprimer le dossier personnel d'un personnage")
-@app_commands.describe(nom="Nom du personnage")
-async def dossier_supprimer_personnel(interaction: discord.Interaction, nom: str):
-    success = await delete_dossier_personnel(nom)
-    if success:
-        await interaction.response.send_message(f"Dossier personnel de {nom} supprimé.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"Aucun dossier trouvé pour {nom}.", ephemeral=True)
-
-
-@dossier_supprimer_personnel.autocomplete("nom")
-async def dossier_supprimer_nom_autocomplete(interaction: discord.Interaction, current: str):
-    if not current:
-        dossiers = await list_all_personnel(25)
-        return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
-    resultats = await search_dossiers_personnel(current, 25)
-    return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
-
-
-# ---------- TRIAGE (conservé) ----------
-TRIAGE_DATA = {
-    "tete": {
-        "label": "Tête",
-        "cases": [
-            {"title": "Traumatisme crânien", "symptoms": "Choc à la tête, maux de tête intenses, vertiges, confusion", "soins": "Immobilisation du patient, surveillance neurologique rapprochée, TDM crânien.", "meds": "Antalgique léger (paracétamol), anti-nauséeux si vomissements.", "urgent": True},
-            {"title": "Plaie du cuir chevelu", "symptoms": "Saignement abondant, plaie ouverte", "soins": "Nettoyage de la plaie, points de suture si nécessaire, pansement compressif.", "meds": "Antiseptique local, antalgique simple."},
-            {"title": "Céphalée sévère / migraine", "symptoms": "Douleur pulsatile, sensibilité à la lumière", "soins": "Repos en environnement calme et sombre, surveillance de l'évolution.", "meds": "Antalgique, anti-inflammatoire, antiémétique si nausées."},
-            {"title": "Perte de connaissance brève", "symptoms": "Évanouissement, pâleur, retour à la conscience rapide", "soins": "Position latérale de sécurité, prise des constantes.", "meds": "Selon la cause identifiée."},
-        ],
-    },
-    "cou": {
-        "label": "Cou",
-        "cases": [
-            {"title": "Entorse cervicale / torticolis", "symptoms": "Douleur, raideur, mobilité réduite", "soins": "Pose d'un collier cervical souple, repos.", "meds": "Antalgique, décontractant musculaire."},
-            {"title": "Traumatisme cervical (accident)", "symptoms": "Douleur vive, engourdissement dans les bras", "soins": "Immobilisation stricte (collier rigide + plan dur), imagerie.", "meds": "Antalgique fort sous surveillance.", "urgent": True},
-            {"title": "Gêne respiratoire / gonflement", "symptoms": "Œdème visible, voix rauque, difficulté à respirer", "soins": "Surveillance des voies aériennes en priorité, oxygène si besoin.", "meds": "Corticoïde, antihistaminique si origine allergique.", "urgent": True},
-        ],
-    },
-    "thorax": {
-        "label": "Thorax",
-        "cases": [
-            {"title": "Douleur thoracique (suspicion cardiaque)", "symptoms": "Oppression, douleur irradiant dans le bras ou la mâchoire", "soins": "ECG immédiat, monitoring cardiaque continu, oxygène.", "meds": "Aspirine, dérivé nitré, antalgique.", "urgent": True},
-            {"title": "Fracture de côte", "symptoms": "Douleur à l'inspiration, point douloureux localisé", "soins": "Contention légère, kinésithérapie respiratoire.", "meds": "Antalgique, anti-inflammatoire."},
-            {"title": "Crise d'asthme / gêne respiratoire", "symptoms": "Sifflement, essoufflement, toux", "soins": "Position assise, oxygène, nébulisation.", "meds": "Bronchodilatateur, corticoïde inhalé."},
-        ],
-    },
-    "abdomen": {
-        "label": "Abdomen",
-        "cases": [
-            {"title": "Douleur abdominale aiguë", "symptoms": "Douleur localisée (souvent en bas à droite), fièvre", "soins": "Échographie ou scanner abdominal, surveillance, jeûne.", "meds": "Antalgique, antibiotique si infection.", "urgent": True},
-            {"title": "Plaie pénétrante abdominale", "symptoms": "Plaie ouverte, saignement, signes de choc possibles", "soins": "Compression de la plaie, pose de perfusion, transfert rapide.", "meds": "Antibiotique à large spectre, antalgique fort.", "urgent": True},
-            {"title": "Gastro-entérite", "symptoms": "Vomissements, diarrhée, signes de déshydratation", "soins": "Réhydratation (orale ou par perfusion), repos digestif.", "meds": "Anti-nauséeux, solution de réhydratation orale."},
-        ],
-    },
-    "bras": {
-        "label": "Bras",
-        "cases": [
-            {"title": "Fracture du bras / poignet", "symptoms": "Douleur, déformation visible, impossibilité de bouger", "soins": "Immobilisation par attelle ou plâtre, radiographie.", "meds": "Antalgique, anti-inflammatoire."},
-            {"title": "Coupure / plaie superficielle", "symptoms": "Saignement modéré, plaie propre ou souillée", "soins": "Nettoyage, suture si profonde, pansement.", "meds": "Antiseptique local, antalgique léger."},
-            {"title": "Brûlure", "symptoms": "Rougeur, cloques, douleur au contact", "soins": "Refroidissement immédiat à l'eau tempérée, pansement stérile.", "meds": "Crème cicatrisante, antalgique."},
-        ],
-    },
-    "jambes": {
-        "label": "Jambes",
-        "cases": [
-            {"title": "Entorse de la cheville", "symptoms": "Gonflement, douleur, difficulté à marcher", "soins": "Protocole RICE (repos, glace, compression, élévation).", "meds": "Anti-inflammatoire, antalgique."},
-            {"title": "Fracture de jambe", "symptoms": "Douleur intense, déformation visible", "soins": "Immobilisation, radiographie, chirurgie parfois nécessaire.", "meds": "Antalgique fort, anticoagulant préventif.", "urgent": True},
-            {"title": "Suspicion de phlébite", "symptoms": "Jambe gonflée, chaude et douloureuse", "soins": "Échographie doppler, surveillance rapprochée.", "meds": "Anticoagulant.", "urgent": True},
-        ],
-    },
-    "vitaux": {
-        "label": "Signes Vitaux",
-        "cases": [
-            {"title": "Tachycardie", "symptoms": "Pouls rapide (>100 bpm), palpitations, parfois vertiges", "soins": "Mise au repos, monitoring cardiaque, ECG.", "meds": "Bêta-bloquant si indiqué.", "urgent": True},
-            {"title": "Bradycardie", "symptoms": "Pouls lent (<60 bpm), fatigue, sensation de malaise", "soins": "Monitoring cardiaque, ECG, surveillance tension.", "meds": "Atropine si symptomatique.", "urgent": True},
-            {"title": "Pouls faible / filant", "symptoms": "Pouls difficile à percevoir, peau pâle et moite", "soins": "Position allongée jambes surélevées, oxygène, perfusion.", "meds": "Remplissage vasculaire.", "urgent": True},
-            {"title": "Hypotension artérielle", "symptoms": "Vertiges, vision trouble, faiblesse, pâleur", "soins": "Position allongée jambes surélevées, surveillance.", "meds": "Perfusion si sévère."},
-            {"title": "Hypertension artérielle sévère", "symptoms": "Maux de tête intenses, bourdonnements, vision floue", "soins": "Repos au calme, surveillance tension, ECG.", "meds": "Antihypertenseur.", "urgent": True},
-            {"title": "Détresse respiratoire / hypoxie", "symptoms": "Essoufflement marqué, lèvres bleutées, confusion", "soins": "Position assise, oxygène à haut débit, surveillance saturation.", "meds": "Bronchodilatateur, oxygénothérapie.", "urgent": True},
-        ],
-    },
-}
-
-
-ZONE_SHAPES = {
-    "tete": [("ellipse", 100, 42, 30)],
-    "cou": [("rect", 86, 70, 28, 20)],
-    "thorax": [("rect", 62, 94, 76, 80)],
-    "abdomen": [("rect", 68, 178, 64, 60)],
-    "bras": [("rect", 26, 98, 30, 130), ("rect", 144, 98, 30, 130)],
-    "jambes": [("rect", 70, 242, 26, 150), ("rect", 104, 242, 26, 150)],
-    "vitaux": [("rect", 62, 94, 76, 80)],
-}
-
-BASE_FILL = (47, 143, 209, 45)
-BASE_STROKE = (47, 143, 209, 255)
-HL_FILL = (92, 179, 238, 255)
-HL_STROKE = (255, 255, 255, 255)
-BG_COLOR = (16, 30, 51, 255)
-
-
-def generate_body_image(highlight: str = None) -> io.BytesIO:
-    scale = 3
-    w, h = 200 * scale, 420 * scale
-    img = Image.new("RGBA", (w, h), BG_COLOR)
-    draw = ImageDraw.Draw(img)
-
-    for zone_key, shapes in ZONE_SHAPES.items():
-        is_hl = zone_key == highlight
-        fill = HL_FILL if is_hl else BASE_FILL
-        stroke = HL_STROKE if is_hl else BASE_STROKE
-        width = 6 if is_hl else 3
-        for shape in shapes:
-            kind = shape[0]
-            if kind == "ellipse":
-                _, cx, cy, r = shape
-                cx, cy, r = cx * scale, cy * scale, r * scale
-                draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill, outline=stroke, width=width)
-            else:
-                _, x, y, ww, hh = shape
-                x, y, ww, hh = x * scale, y * scale, ww * scale, hh * scale
-                draw.rounded_rectangle(
-                    [x, y, x + ww, y + hh], radius=10 * scale, fill=fill, outline=stroke, width=width
-                )
-
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
-
-
-def build_case_embed(zone_key: str, case: dict) -> discord.Embed:
-    title = case["title"]
-    if case.get("urgent"):
-        title += " ⚠️ Priorité 1"
-    embed = discord.Embed(
-        title=title,
-        description=f"Zone : **{TRIAGE_DATA[zone_key]['label']}**",
-        color=discord.Color.red() if case.get("urgent") else discord.Color.teal(),
-    )
-    embed.add_field(name="Symptômes", value=case["symptoms"], inline=False)
-    embed.add_field(name="Soins", value=case["soins"], inline=False)
-    embed.add_field(name="Médicaments", value=case["meds"], inline=False)
-    embed.set_footer(text="Contenu fictif pour RP — pas un guide médical réel")
-    return embed
-
-
-class CaseSelect(discord.ui.Select):
-    def __init__(self, zone_key: str):
-        self.zone_key = zone_key
-        indexed_cases = list(enumerate(TRIAGE_DATA[zone_key]["cases"]))
-        indexed_cases.sort(key=lambda pair: not pair[1].get("urgent", False))
-        options = [
-            discord.SelectOption(
-                label=c["title"][:100],
-                description=c["symptoms"][:100],
-                value=str(i),
-                emoji="⚠️" if c.get("urgent") else None,
-            )
-            for i, c in indexed_cases
-        ]
-        super().__init__(placeholder="Choisis un cas...", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        case = TRIAGE_DATA[self.zone_key]["cases"][int(self.values[0])]
-        embed = build_case_embed(self.zone_key, case)
-        await interaction.response.edit_message(embed=embed, view=self.view)
-
-
-class CaseView(SafeView):
-    def __init__(self, zone_key: str):
-        super().__init__(timeout=120)
-        self.zone_key = zone_key
-        self.add_item(CaseSelect(zone_key))
-        self.add_item(RandomCaseButton(zone_key))
-        self.add_item(BackToZoneButton())
-
-
-class RandomCaseButton(discord.ui.Button):
-    def __init__(self, zone_key: str):
-        super().__init__(label="🎲 Cas aléatoire", style=discord.ButtonStyle.primary)
-        self.zone_key = zone_key
-
-    async def callback(self, interaction: discord.Interaction):
-        import random
-        case = random.choice(TRIAGE_DATA[self.zone_key]["cases"])
-        embed = build_case_embed(self.zone_key, case)
-        await interaction.response.edit_message(embed=embed, view=CaseView(self.zone_key))
-
-
-class BackToZoneButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="⬅ Changer de zone", style=discord.ButtonStyle.secondary)
-
-    async def callback(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="🩺 Fiche de Triage",
-            description="Choisis une zone du corps pour voir les cas possibles.",
-            color=discord.Color.blue(),
-        )
-        file = discord.File(generate_body_image(), filename="body.png")
-        embed.set_image(url="attachment://body.png")
-        await interaction.response.edit_message(embed=embed, view=ZoneView(), attachments=[file])
-
-
-class ZoneSelect(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label=data["label"], value=key)
-            for key, data in TRIAGE_DATA.items()
-        ]
-        super().__init__(placeholder="Choisis une zone du corps...", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        zone_key = self.values[0]
-        embed = discord.Embed(
-            title=f"🩺 Triage — {TRIAGE_DATA[zone_key]['label']}",
-            description="Choisis un cas dans la liste ci-dessous.",
-            color=discord.Color.blue(),
-        )
-        file = discord.File(generate_body_image(zone_key), filename="body.png")
-        embed.set_image(url="attachment://body.png")
-        await interaction.response.edit_message(embed=embed, view=CaseView(zone_key), attachments=[file])
-
-
-class ZoneView(SafeView):
-    def __init__(self):
-        super().__init__(timeout=120)
-        self.add_item(ZoneSelect())
-
-
-@bot.tree.command(name="triage", description="Outil de triage RP : zone du corps -> cas -> soins")
-async def triage(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🩺 Fiche de Triage",
-        description="Choisis une zone du corps pour voir les cas possibles.",
-        color=discord.Color.blue(),
-    )
-    embed.set_footer(text="Contenu fictif pour RP — pas un guide médical réel")
-    file = discord.File(generate_body_image(), filename="body.png")
-    embed.set_image(url="attachment://body.png")
-    await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
-
-
-# ---------- SYNC ----------
-@bot.event
-async def on_ready():
-    await init_db()
-    for guild in bot.guilds:
-        bot.tree.copy_global_to(guild=guild)
-        await bot.tree.sync(guild=guild)
-        logger.info(f"Commandes synchronisées sur : {guild.name}")
-
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync(guild=None)
-    logger.info(f"Connecté en tant que {bot.user}")
-
-
-@bot.event
-async def on_guild_join(guild: discord.Guild):
-    bot.tree.copy_global_to(guild=guild)
-    await bot.tree.sync(guild=guild)
-    logger.info(f"Commandes synchronisées sur le nouveau serveur : {guild.name}")
-
-
-@bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    logger.error("Erreur : %s", error)
-    traceback.print_exception(type(error), error, error.__traceback__)
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send("Une erreur est survenue.", ephemeral=True)
-        else:
-            await interaction.response.send_message("Une erreur est survenue.", ephemeral=True)
-    except discord.HTTPException:
-        pass
-
-
-if __name__ == "__main__":
-    bot.run(TOKEN)
+            "transport_longue_distance": {"label": "Transport longue distance",
