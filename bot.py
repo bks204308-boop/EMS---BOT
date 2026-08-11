@@ -196,9 +196,11 @@ async def list_all_personnel(limit: int = 50) -> List[dict]:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
-# ---------- EXPORT PDF ----------
-import textwrap 
 
+
+import textwrap
+
+# ---------- EXPORT PDF ----------
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -209,19 +211,42 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
     def clean_text(text: str, max_word_len: int = 40) -> str:
         if not text:
             return "Non renseigné"
-        words = str(text).strip().split(" ")
+        
+        s = str(text).strip()
+        
+        # Remplacement des caractères Unicode fréquents non supportés
+        replacements = {
+            "•": "-",
+            "–": "-",
+            "—": "-",
+            "’": "'",
+            "“": '"',
+            "”": '"',
+            "…": "...",
+        }
+        for orig, repl in replacements.items():
+            s = s.replace(orig, repl)
+            
+        # Filtrage strict : remplace les caractères hors Latin-1 (emojis, symboles spéciaux)
+        s = s.encode("latin-1", errors="replace").decode("latin-1")
+        
+        # Découpage des mots trop longs
+        words = s.split(" ")
         cleaned = []
         for word in words:
             if len(word) > max_word_len:
                 word = " ".join(textwrap.wrap(word, max_word_len))
             cleaned.append(word)
+            
         return " ".join(cleaned)
 
+    # Titre
     pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "B", 16)
     pdf.multi_cell(epw, 10, clean_text(title), new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
     
+    # Champs
     for label, value in fields:
         pdf.set_x(pdf.l_margin)
         pdf.set_font("Helvetica", "B", 12)
@@ -232,6 +257,7 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
         pdf.multi_cell(epw, 7, clean_text(value), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(2)
         
+    # Pied de page
     if footer:
         pdf.set_x(pdf.l_margin)
         pdf.set_font("Helvetica", "I", 9)
@@ -247,6 +273,7 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
     buf = io.BytesIO(raw_output)
     buf.seek(0)
     return buf
+
 
 
 class SafeView(discord.ui.View):
