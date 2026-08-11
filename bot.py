@@ -141,6 +141,14 @@ async def save_dossier_intervention(
         await db.commit()
         return cursor.lastrowid
 
+async def update_statut_facture(record_id: int, statut: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE dossiers_intervention SET statut_facture = ? WHERE id = ?",
+            (statut, record_id),
+        )
+        await db.commit()
+
 async def get_interventions_for_patient(
     patient_name: str, limit: int = 5
 ) -> List[dict]:
@@ -242,6 +250,42 @@ class ExportPDFView(SafeView):
         await interaction.response.send_message(
             file=discord.File(buf, filename=self.filename), ephemeral=True
         )
+
+# ---------- VUE FINALE DE FACTURATION (PDF + PAYÉ) ----------
+class FacturationFinalView(SafeView):
+    def __init__(self, title: str, fields: List[tuple], filename: str, record_id: int, footer: str = ""):
+        super().__init__(timeout=300)
+        self.title = title
+        self.fields = fields
+        self.filename = filename
+        self.record_id = record_id
+        self.footer = footer
+
+    @discord.ui.button(label="📄 Exporter en PDF", style=discord.ButtonStyle.secondary, row=0)
+    async def export(self, interaction: discord.Interaction, button: discord.ui.Button):
+        buf = generate_pdf(self.title, self.fields, self.footer)
+        await interaction.response.send_message(
+            file=discord.File(buf, filename=self.filename), ephemeral=True
+        )
+
+    @discord.ui.button(label="💳 Facture payée", style=discord.ButtonStyle.success, row=0)
+    async def pay_invoice(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await update_statut_facture(self.record_id, "Payée")
+        
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.green()
+        
+        # Mettre à jour le champ de statut dans l'embed
+        for index, field in enumerate(embed.fields):
+            if field.name == "Statut de paiement":
+                embed.set_field_at(index, name="Statut de paiement", value="✅ **Payée**", inline=False)
+                break
+
+        button.disabled = True
+        button.label = "✅ Facture payée"
+        button.style = discord.ButtonStyle.secondary
+
+        await interaction.response.edit_message(embed=embed, view=self)
 
 # ---------- FORMULAIRE : DOSSIER MÉDICAL ----------
 async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dict):
@@ -1184,17 +1228,18 @@ class FacturationSummaryView(SafeView):
             created_by=interaction.user.id,
             created_by_name=interaction.user.display_name,
         )
-        embed = discord.Embed(title="🧾 Facturation finale", color=discord.Color.green())
+        embed = discord.Embed(title="🧾 Facturation finale", color=discord.Color.gold())
         embed.add_field(name="Patient", value=self.session.patient_name, inline=False)
         embed.add_field(name="Soins effectués", value=detail_text, inline=False)
         embed.add_field(
             name="Total", value=f"**{self.session.total} $**", inline=False
         )
+        embed.add_field(name="Statut de paiement", value="⏳ **En attente**", inline=False)
         embed.set_footer(
             text=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}"
         )
 
-        pdf_view = ExportPDFView(
+        final_view = FacturationFinalView(
             title="Facturation EMS",
             fields=[
                 ("Patient", self.session.patient_name),
@@ -1202,9 +1247,10 @@ class FacturationSummaryView(SafeView):
                 ("Total", f"{self.session.total} $"),
             ],
             filename=f"facturation_{record_id}.pdf",
+            record_id=record_id,
             footer=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}",
         )
-        await interaction.response.edit_message(embed=embed, view=pdf_view)
+        await interaction.response.edit_message(embed=embed, view=final_view)
 
 @bot.tree.command(
     name="facturation",
