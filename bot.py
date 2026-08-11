@@ -2,6 +2,7 @@ import io
 import logging
 import os
 import random
+import textwrap
 import traceback
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -196,10 +197,6 @@ async def list_all_personnel(limit: int = 50) -> List[dict]:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
-
-
-import textwrap
-
 # ---------- EXPORT PDF ----------
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
     pdf = FPDF()
@@ -213,8 +210,6 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
             return "Non renseigné"
         
         s = str(text).strip()
-        
-        # Remplacement des caractères Unicode fréquents non supportés
         replacements = {
             "•": "-",
             "–": "-",
@@ -227,10 +222,8 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
         for orig, repl in replacements.items():
             s = s.replace(orig, repl)
             
-        # Filtrage strict : remplace les caractères hors Latin-1 (emojis, symboles spéciaux)
         s = s.encode("latin-1", errors="replace").decode("latin-1")
         
-        # Découpage des mots trop longs
         words = s.split(" ")
         cleaned = []
         for word in words:
@@ -240,13 +233,11 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
             
         return " ".join(cleaned)
 
-    # Titre
     pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "B", 16)
     pdf.multi_cell(epw, 10, clean_text(title), new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
     
-    # Champs
     for label, value in fields:
         pdf.set_x(pdf.l_margin)
         pdf.set_font("Helvetica", "B", 12)
@@ -257,7 +248,6 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
         pdf.multi_cell(epw, 7, clean_text(value), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(2)
         
-    # Pied de page
     if footer:
         pdf.set_x(pdf.l_margin)
         pdf.set_font("Helvetica", "I", 9)
@@ -274,8 +264,7 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
     buf.seek(0)
     return buf
 
-
-
+# ---------- VIEWS ET BOUTONS DE TRANSITION ----------
 class SafeView(discord.ui.View):
     async def on_error(
         self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item
@@ -290,6 +279,18 @@ class SafeView(discord.ui.View):
                 await interaction.response.send_message(message, ephemeral=True)
         except discord.HTTPException:
             pass
+
+class NextStepView(SafeView):
+    """Vue de transition permettant d'ouvrir le Modal suivant sans erreur API."""
+    def __init__(self, next_modal: discord.ui.Modal, label: str):
+        super().__init__(timeout=180)
+        self.next_modal = next_modal
+        button = discord.ui.Button(label=label, style=discord.ButtonStyle.primary)
+        button.callback = self.on_click
+        self.add_item(button)
+
+    async def on_click(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(self.next_modal)
 
 class ExportPDFView(SafeView):
     def __init__(self, title: str, fields: List[tuple], filename: str, footer: str = ""):
@@ -306,7 +307,6 @@ class ExportPDFView(SafeView):
             file=discord.File(buf, filename=self.filename), ephemeral=True
         )
 
-# ---------- VUE FINALE DE FACTURATION (PDF + PAYÉ) ----------
 class FacturationFinalView(SafeView):
     def __init__(self, title: str, fields: List[tuple], filename: str, record_id: int, footer: str = ""):
         super().__init__(timeout=300)
@@ -330,7 +330,6 @@ class FacturationFinalView(SafeView):
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.green()
         
-        # Mettre à jour le champ de statut dans l'embed
         for index, field in enumerate(embed.fields):
             if field.name == "Statut de paiement":
                 embed.set_field_at(index, name="Statut de paiement", value="✅ **Payée**", inline=False)
@@ -341,7 +340,6 @@ class FacturationFinalView(SafeView):
         button.style = discord.ButtonStyle.secondary
 
         await interaction.response.edit_message(embed=embed, view=self)
-
 
 # ---------- FORMULAIRE : DOSSIER MÉDICAL ----------
 async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dict):
@@ -515,7 +513,12 @@ class DossierMedicalModal3(discord.ui.Modal, title="Dossier Médical (3/4) - Exa
                 "vision": self.vision.value,
             }
         )
-        await interaction.response.send_modal(DossierMedicalModal4(self.data))
+        next_view = NextStepView(DossierMedicalModal4(self.data), label="Étape 4/4 : Conclusion ➡️")
+        await interaction.response.send_message(
+            "✅ **Étape 3/4 validée.** Cliquez ci-dessous pour l'étape finale.",
+            view=next_view,
+            ephemeral=True,
+        )
 
 class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Antécédents"):
     allergies = discord.ui.TextInput(
@@ -552,7 +555,12 @@ class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Ant
                 "taille": self.taille.value,
             }
         )
-        await interaction.response.send_modal(DossierMedicalModal3(self.data))
+        next_view = NextStepView(DossierMedicalModal3(self.data), label="Étape 3/4 : Examen clinique ➡️")
+        await interaction.response.send_message(
+            "✅ **Étape 2/4 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
+        )
 
 class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Identité"):
     nom = discord.ui.TextInput(label="Nom & prénom", placeholder="Ex: Jean Dupont")
@@ -575,7 +583,12 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
             "date_visite": self.date_visite.value,
             "medecin_ems": self.medecin_ems.value,
         }
-        await interaction.response.send_modal(DossierMedicalModal2(data))
+        next_view = NextStepView(DossierMedicalModal2(data), label="Étape 2/4 : Antécédents ➡️")
+        await interaction.response.send_message(
+            "✅ **Étape 1/4 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
+        )
 
 # ---------- FORMULAIRE : MODIFICATION ----------
 _MODIF_LABELS = {
@@ -687,8 +700,14 @@ class DossierModifierModal4(discord.ui.Modal, title="Modification (4/5) - Conclu
                 "nouvelles_recommandations": self.nouvelles_recommandations.value,
             }
         )
-        await interaction.response.send_modal(
-            DossierModifierModal5(self.ancien_nom, self.data)
+        next_view = NextStepView(
+            DossierModifierModal5(self.ancien_nom, self.data),
+            label="Étape 5/5 : Signature ➡️",
+        )
+        await interaction.response.send_message(
+            "✅ **Étape 4/5 validée.** Cliquez ci-dessous pour terminer.",
+            view=next_view,
+            ephemeral=True,
         )
 
 class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen clinique"):
@@ -723,8 +742,14 @@ class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen
                 "nouvelle_respiration": self.nouvelle_respiration.value,
             }
         )
-        await interaction.response.send_modal(
-            DossierModifierModal4(self.ancien_nom, self.data)
+        next_view = NextStepView(
+            DossierModifierModal4(self.ancien_nom, self.data),
+            label="Étape 4/5 : Conclusion ➡️",
+        )
+        await interaction.response.send_message(
+            "✅ **Étape 3/5 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
         )
 
 class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antécédents"):
@@ -767,8 +792,14 @@ class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antéc
                 "nouveaux_antecedents": self.nouveaux_antecedents.value,
             }
         )
-        await interaction.response.send_modal(
-            DossierModifierModal3(self.ancien_nom, self.data)
+        next_view = NextStepView(
+            DossierModifierModal3(self.ancien_nom, self.data),
+            label="Étape 3/5 : Examen clinique ➡️",
+        )
+        await interaction.response.send_message(
+            "✅ **Étape 2/5 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
         )
 
 class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/5) - Identité"):
@@ -797,8 +828,14 @@ class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/5) - 
             "nouveau_sexe": self.nouveau_sexe.value,
             "nouvelle_date": self.nouvelle_date.value,
         }
-        await interaction.response.send_modal(
-            DossierModifierModal2(self.ancien_nom.value, data)
+        next_view = NextStepView(
+            DossierModifierModal2(self.ancien_nom.value, data),
+            label="Étape 2/5 : Antécédents ➡️",
+        )
+        await interaction.response.send_message(
+            "✅ **Étape 1/5 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
         )
 
 # ---------- FORMULAIRE : RAPPORT INTERVENTION EMS ----------
@@ -974,7 +1011,12 @@ class RapportInterventionModal3(discord.ui.Modal, title="Rapport EMS (3/4) - Pro
                 "observations": self.observations.value,
             }
         )
-        await interaction.response.send_modal(RapportInterventionModal4(self.data))
+        next_view = NextStepView(RapportInterventionModal4(self.data), label="Étape 4/4 : Conclusion ➡️")
+        await interaction.response.send_message(
+            "✅ **Étape 3/4 validée.** Cliquez ci-dessous pour terminer.",
+            view=next_view,
+            ephemeral=True,
+        )
 
 class RapportInterventionModal2(discord.ui.Modal, title="Rapport EMS (2/4) - Patient"):
     lieu = discord.ui.TextInput(
@@ -1011,7 +1053,12 @@ class RapportInterventionModal2(discord.ui.Modal, title="Rapport EMS (2/4) - Pat
                 "signes_vitaux": self.signes_vitaux.value,
             }
         )
-        await interaction.response.send_modal(RapportInterventionModal3(self.data))
+        next_view = NextStepView(RapportInterventionModal3(self.data), label="Étape 3/4 : Procédure ➡️")
+        await interaction.response.send_message(
+            "✅ **Étape 2/4 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
+        )
 
 class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Horaires"):
     date = discord.ui.TextInput(label="Date", placeholder="JJ/MM/AAAA")
@@ -1038,8 +1085,14 @@ class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Hora
             "heure_fin": self.heure_fin.value,
             "ems_noms": self.ems_noms.value,
         }
-        await interaction.response.send_modal(
-            RapportInterventionModal2(data, patient_name=self.patient_name)
+        next_view = NextStepView(
+            RapportInterventionModal2(data, patient_name=self.patient_name),
+            label="Étape 2/4 : Patient ➡️",
+        )
+        await interaction.response.send_message(
+            "✅ **Étape 1/4 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
         )
 
 # ---------- FACTURATION ET CATEGORIES ----------
