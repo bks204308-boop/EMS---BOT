@@ -1,11 +1,10 @@
-import os
 import io
-import random
-import asyncio
 import logging
+import os
+import random
 import traceback
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import List, Optional
 
 import aiosqlite
 import discord
@@ -16,15 +15,12 @@ from PIL import Image, ImageDraw
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 DB_PATH = os.getenv("BOT_DB_PATH", "bot_data.db")
-
 logger = logging.getLogger("rp_medical_bot")
 logging.basicConfig(level=logging.INFO)
 
 intents = discord.Intents.default()
 intents.message_content = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 
 # ---------- BASE DE DONNÉES ----------
 async def init_db():
@@ -62,25 +58,38 @@ async def init_db():
         )
         await db.commit()
 
-
-async def save_dossier_personnel(nom: str, age: str, groupe_sanguin: str,
-                                  allergies: str, contact_urgence: str, created_by: int):
+async def save_dossier_personnel(
+    nom: str,
+    age: str,
+    groupe_sanguin: str,
+    allergies: str,
+    contact_urgence: str,
+    created_by: int,
+):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
-            INSERT INTO dossiers_personnel
-                (nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
+            INSERT INTO dossiers_personnel (nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(nom) DO UPDATE SET
-                age=excluded.age, groupe_sanguin=excluded.groupe_sanguin,
-                allergies=excluded.allergies, contact_urgence=excluded.contact_urgence,
+                age=excluded.age,
+                groupe_sanguin=excluded.groupe_sanguin,
+                allergies=excluded.allergies,
+                contact_urgence=excluded.contact_urgence,
                 updated_at=excluded.updated_at
             """,
-            (nom, age, groupe_sanguin, allergies, contact_urgence, created_by,
-             datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
+            (
+                nom,
+                age,
+                groupe_sanguin,
+                allergies,
+                contact_urgence,
+                created_by,
+                datetime.now(timezone.utc).isoformat(),
+                datetime.now(timezone.utc).isoformat(),
+            ),
         )
         await db.commit()
-
 
 async def get_dossier_personnel(nom: str) -> Optional[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -90,7 +99,6 @@ async def get_dossier_personnel(nom: str) -> Optional[dict]:
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
-
 
 async def search_dossiers_personnel(nom_query: str, limit: int = 25) -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -102,35 +110,40 @@ async def search_dossiers_personnel(nom_query: str, limit: int = 25) -> List[dic
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
-
-async def save_dossier_intervention(patient_name: str, blessure: str, soins: str, 
-                                     transport: str, facture: str, statut_facture: str, 
-                                     created_by: int, created_by_name: str) -> int:
+async def save_dossier_intervention(
+    patient_name: str,
+    blessure: str,
+    soins: str,
+    transport: str,
+    facture: str,
+    statut_facture: str,
+    created_by: int,
+    created_by_name: str,
+) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            INSERT INTO dossiers_intervention
-                (patient_name, blessure, soins, transport, facture,
-                 statut_facture, created_by, created_by_name, created_at)
+            INSERT INTO dossiers_intervention (patient_name, blessure, soins, transport, facture, statut_facture, created_by, created_by_name, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (patient_name, blessure, soins, transport, facture,
-             statut_facture, created_by, created_by_name, datetime.now(timezone.utc).isoformat()),
+            (
+                patient_name,
+                blessure,
+                soins,
+                transport,
+                facture,
+                statut_facture,
+                created_by,
+                created_by_name,
+                datetime.now(timezone.utc).isoformat(),
+            ),
         )
         await db.commit()
         return cursor.lastrowid
 
-
-async def update_facture_statut(record_id: int, statut: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE dossiers_intervention SET statut_facture = ? WHERE id = ?",
-            (statut, record_id)
-        )
-        await db.commit()
-
-
-async def get_interventions_for_patient(patient_name: str, limit: int = 5) -> List[dict]:
+async def get_interventions_for_patient(
+    patient_name: str, limit: int = 5
+) -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -140,30 +153,31 @@ async def get_interventions_for_patient(patient_name: str, limit: int = 5) -> Li
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
-
 async def list_recent_interventions(limit: int = 10) -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT ?",
+            (limit,),
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
-
 async def delete_intervention(record_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("DELETE FROM dossiers_intervention WHERE id = ?", (record_id,))
+        cursor = await db.execute(
+            "DELETE FROM dossiers_intervention WHERE id = ?", (record_id,)
+        )
         await db.commit()
         return cursor.rowcount > 0
-
 
 async def delete_dossier_personnel(nom: str) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("DELETE FROM dossiers_personnel WHERE nom = ?", (nom,))
+        cursor = await db.execute(
+            "DELETE FROM dossiers_personnel WHERE nom = ?", (nom,)
+        )
         await db.commit()
         return cursor.rowcount > 0
-
 
 async def list_all_personnel(limit: int = 50) -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -173,7 +187,6 @@ async def list_all_personnel(limit: int = 50) -> List[dict]:
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-
 
 # ---------- EXPORT PDF ----------
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
@@ -200,9 +213,10 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
     buf.seek(0)
     return buf
 
-
 class SafeView(discord.ui.View):
-    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
+    async def on_error(
+        self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item
+    ):
         logger.error("Erreur dans le composant %s : %s", item, error)
         traceback.print_exception(type(error), error, error.__traceback__)
         message = "Une erreur est survenue en traitant cette action."
@@ -214,142 +228,84 @@ class SafeView(discord.ui.View):
         except discord.HTTPException:
             pass
 
-
 class ExportPDFView(SafeView):
     def __init__(self, title: str, fields: List[tuple], filename: str, footer: str = ""):
-        super().__init__(timeout=None)
-        self.title = title
-        self.fields = fields
-        self.filename = filename
-        self.footer = footer
-
-    @discord.ui.button(label="📄 Exporter en PDF", style=discord.ButtonStyle.secondary)
-    async def export(self, interaction: discord.Interaction, button: discord.ui.Button):
-        buf = generate_pdf(self.title, self.fields, self.footer)
-        await interaction.response.send_message(
-            file=discord.File(buf, filename=self.filename), ephemeral=True
-        )
-
-
-class PublishedFactureView(SafeView):
-    def __init__(self, title: str, fields: List[tuple], filename: str, footer: str = "", record_id: Optional[int] = None):
-        super().__init__(timeout=None)
-        self.title = title
-        self.fields = fields
-        self.filename = filename
-        self.footer = footer
-        self.record_id = record_id
-
-    @discord.ui.button(label="📄 Exporter en PDF", style=discord.ButtonStyle.secondary)
-    async def export(self, interaction: discord.Interaction, button: discord.ui.Button):
-        buf = generate_pdf(self.title, self.fields, self.footer)
-        await interaction.response.send_message(
-            file=discord.File(buf, filename=self.filename), ephemeral=True
-        )
-
-    @discord.ui.button(label="💳 Valider le paiement", style=discord.ButtonStyle.success)
-    async def pay(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.record_id:
-            await update_facture_statut(self.record_id, "Payée")
-
-        embed = interaction.message.embeds[0]
-        
-        # Mise à jour ou ajout du champ statut de paiement dans l'embed
-        updated = False
-        for i, field in enumerate(embed.fields):
-            if "Statut" in field.name:
-                embed.set_field_at(i, name="Statut du paiement", value=f"✅ **Payée** (validé par {interaction.user.display_name})", inline=False)
-                updated = True
-                break
-        if not updated:
-            embed.add_field(name="Statut du paiement", value=f"✅ **Payée** (validé par {interaction.user.display_name})", inline=False)
-
-        embed.color = discord.Color.blue()
-
-        button.disabled = True
-        button.label = "Facture Payée ✅"
-        button.style = discord.ButtonStyle.secondary
-
-        await interaction.response.edit_message(embed=embed, view=self)
-
-
-class RapportReviewView(SafeView):
-    def __init__(self, embed: discord.Embed, pdf_title: str, pdf_fields: List[tuple], pdf_filename: str, pdf_footer: str, record_id: Optional[int] = None, is_facture: bool = False):
         super().__init__(timeout=300)
-        self.embed = embed
-        self.pdf_title = pdf_title
-        self.pdf_fields = pdf_fields
-        self.pdf_filename = pdf_filename
-        self.pdf_footer = pdf_footer
-        self.record_id = record_id
-        self.is_facture = is_facture
+        self.title = title
+        self.fields = fields
+        self.filename = filename
+        self.footer = footer
 
     @discord.ui.button(label="📄 Exporter en PDF", style=discord.ButtonStyle.secondary)
     async def export(self, interaction: discord.Interaction, button: discord.ui.Button):
-        buf = generate_pdf(self.pdf_title, self.pdf_fields, self.pdf_footer)
+        buf = generate_pdf(self.title, self.fields, self.footer)
         await interaction.response.send_message(
-            file=discord.File(buf, filename=self.pdf_filename), ephemeral=True
+            file=discord.File(buf, filename=self.filename), ephemeral=True
         )
-
-    @discord.ui.button(label="✅ Publier définitivement", style=discord.ButtonStyle.success)
-    async def publish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.is_facture:
-            final_view = PublishedFactureView(
-                title=self.pdf_title,
-                fields=self.pdf_fields,
-                filename=self.pdf_filename,
-                footer=self.pdf_footer,
-                record_id=self.record_id
-            )
-        else:
-            final_view = ExportPDFView(
-                title=self.pdf_title,
-                fields=self.pdf_fields,
-                filename=self.pdf_filename,
-                footer=self.pdf_footer
-            )
-        
-        await interaction.channel.send(embed=self.embed, view=final_view)
-        
-        button.disabled = True
-        button.label = "Publié !"
-        await interaction.response.edit_message(view=self)
-
 
 # ---------- FORMULAIRE : DOSSIER MÉDICAL ----------
 async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dict):
-    embed = discord.Embed(title="**__🩺 Dossier Médical – Visite Standard__**", color=discord.Color.blue())
-
+    embed = discord.Embed(
+        title="**__🩺 Dossier Médical – Visite Standard__**", color=discord.Color.blue()
+    )
     embed.add_field(name="**__Identité du patient__**", value="\u200b", inline=False)
     embed.add_field(name="**Nom & prénom**", value=data["nom"], inline=True)
     embed.add_field(name="**Âge**", value=data["age"], inline=True)
     embed.add_field(name="**Sexe**", value=data["sexe"], inline=True)
     embed.add_field(name="**Date de la visite**", value=data["date_visite"], inline=True)
     embed.add_field(name="**Médecin / EMS**", value=data["medecin_ems"], inline=True)
-
     embed.add_field(name="\n```Antécédents médicaux```", value="\u200b", inline=False)
     embed.add_field(name="Allergies", value=data["allergies"] or "Aucune", inline=True)
-    embed.add_field(name="Maladies chroniques", value=data["maladies_chroniques"] or "Aucune", inline=True)
-    embed.add_field(name="Traitement(s) actuel(s)", value=data["traitements"] or "Non", inline=True)
-    embed.add_field(name="Antécédents chirurgicaux", value=data["antecedents_chirurgicaux"] or "Non", inline=True)
-
+    embed.add_field(
+        name="Maladies chroniques",
+        value=data["maladies_chroniques"] or "Aucune",
+        inline=True,
+    )
+    embed.add_field(
+        name="Traitement(s) actuel(s)", value=data["traitements"] or "Non", inline=True
+    )
+    embed.add_field(
+        name="Antécédents chirurgicaux",
+        value=data["antecedents_chirurgicaux"] or "Non",
+        inline=True,
+    )
     embed.add_field(name="\n```Examen clinique```", value="\u200b", inline=False)
-    embed.add_field(name="Taille", value=f"{data['taille']} cm" if data["taille"] else "N/A", inline=True)
-    embed.add_field(name="Poids", value=f"{data['poids']} kg" if data["poids"] else "N/A", inline=True)
-    embed.add_field(name="Groupe sanguin", value=data["groupe_sanguin"] or "N/A", inline=True)
+    embed.add_field(
+        name="Taille",
+        value=f"{data['taille']} cm" if data["taille"] else "N/A",
+        inline=True,
+    )
+    embed.add_field(
+        name="Poids",
+        value=f"{data['poids']} kg" if data["poids"] else "N/A",
+        inline=True,
+    )
+    embed.add_field(
+        name="Groupe sanguin", value=data["groupe_sanguin"] or "N/A", inline=True
+    )
     embed.add_field(name="Pouls", value=data["pouls"] or "N/A", inline=True)
     embed.add_field(name="Respiration", value=data["respiration"] or "N/A", inline=True)
     embed.add_field(name="Vision", value=data["vision"] or "N/A", inline=True)
     embed.add_field(name="Audition", value=data["audition"] or "N/A", inline=True)
-
-    embed.add_field(name="\n```Observations du médecin```", value=data["observations"] or "Aucune observation", inline=False)
-
+    embed.add_field(
+        name="\n```Observations du médecin```",
+        value=data["observations"] or "Aucune observation",
+        inline=False,
+    )
     embed.add_field(name="\n```Conclusion```", value="\u200b", inline=False)
-    embed.add_field(name="Aptitude", value=data["aptitude"] or "Non spécifié", inline=True)
-    embed.add_field(name="Recommandations", value=data["recommandations"] or "Aucun suivi nécessaire", inline=True)
-
-    embed.add_field(name="\n**Signature & cachet du médecin**", value=data["signature"] or "Non signé", inline=False)
-
+    embed.add_field(
+        name="Aptitude", value=data["aptitude"] or "Non spécifié", inline=True
+    )
+    embed.add_field(
+        name="Recommandations",
+        value=data["recommandations"] or "Aucun suivi nécessaire",
+        inline=True,
+    )
+    embed.add_field(
+        name="\n**Signature & cachet du médecin**",
+        value=data["signature"] or "Non signé",
+        inline=False,
+    )
     embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
 
     await save_dossier_personnel(
@@ -390,79 +346,96 @@ async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dic
     )
     await interaction.response.send_message(embed=embed, view=view)
 
-
 class DossierMedicalModal4(discord.ui.Modal, title="Dossier Médical (4/4) - Conclusion"):
-    audition = discord.ui.TextInput(label="Audition", placeholder="Normale / Diminuée", required=False)
+    audition = discord.ui.TextInput(
+        label="Audition", placeholder="Normale / Diminuée", required=False
+    )
     observations = discord.ui.TextInput(
         label="Observations du médecin",
         style=discord.TextStyle.paragraph,
         placeholder="Ex: Patient en bonne santé générale, apte à la conduite.",
-        required=False
+        required=False,
     )
     aptitude = discord.ui.TextInput(
         label="Conclusion - Aptitude",
         placeholder="Patient apte / inapte selon la visite médicale.",
-        required=False
+        required=False,
     )
     recommandations = discord.ui.TextInput(
         label="Recommandations",
         placeholder="Contrôle dans 6 mois / Suivi spécialisé / Aucun suivi",
-        required=False
+        required=False,
     )
-    signature = discord.ui.TextInput(label="Signature & cachet du médecin", placeholder="Signature", required=False)
+    signature = discord.ui.TextInput(
+        label="Signature & cachet du médecin", placeholder="Signature", required=False
+    )
 
     def __init__(self, data: dict):
         super().__init__()
         self.data = data
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.data.update({
-            "audition": self.audition.value,
-            "observations": self.observations.value,
-            "aptitude": self.aptitude.value,
-            "recommandations": self.recommandations.value,
-            "signature": self.signature.value,
-        })
+        self.data.update(
+            {
+                "audition": self.audition.value,
+                "observations": self.observations.value,
+                "aptitude": self.aptitude.value,
+                "recommandations": self.recommandations.value,
+                "signature": self.signature.value,
+            }
+        )
         await _finaliser_dossier_medical(interaction, self.data)
-
 
 class DossierMedicalModal3(discord.ui.Modal, title="Dossier Médical (3/4) - Examen clinique"):
     poids = discord.ui.TextInput(label="Poids", placeholder="kg", required=False)
-    groupe_sanguin = discord.ui.TextInput(label="Groupe sanguin", placeholder="Ex: A+", required=False)
-    pouls = discord.ui.TextInput(label="Pouls", placeholder="Normal / Rapide / Lent", required=False)
-    respiration = discord.ui.TextInput(label="Respiration", placeholder="Normale / Difficile", required=False)
-    vision = discord.ui.TextInput(label="Vision", placeholder="Normale / Corrigée / Trouble", required=False)
+    groupe_sanguin = discord.ui.TextInput(
+        label="Groupe sanguin", placeholder="Ex: A+", required=False
+    )
+    pouls = discord.ui.TextInput(
+        label="Pouls", placeholder="Normal / Rapide / Lent", required=False
+    )
+    respiration = discord.ui.TextInput(
+        label="Respiration", placeholder="Normale / Difficile", required=False
+    )
+    vision = discord.ui.TextInput(
+        label="Vision", placeholder="Normale / Corrigée / Trouble", required=False
+    )
 
     def __init__(self, data: dict):
         super().__init__()
         self.data = data
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.data.update({
-            "poids": self.poids.value,
-            "groupe_sanguin": self.groupe_sanguin.value,
-            "pouls": self.pouls.value,
-            "respiration": self.respiration.value,
-            "vision": self.vision.value,
-        })
+        self.data.update(
+            {
+                "poids": self.poids.value,
+                "groupe_sanguin": self.groupe_sanguin.value,
+                "pouls": self.pouls.value,
+                "respiration": self.respiration.value,
+                "vision": self.vision.value,
+            }
+        )
         await interaction.response.send_modal(DossierMedicalModal4(self.data))
-
 
 class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Antécédents"):
     allergies = discord.ui.TextInput(
         label="Allergies",
         placeholder="Aucune / Oui, préciser",
         style=discord.TextStyle.paragraph,
-        required=False
+        required=False,
     )
     maladies_chroniques = discord.ui.TextInput(
         label="Maladies chroniques",
         placeholder="Hypertension, diabète, asthme… / Aucune",
         style=discord.TextStyle.paragraph,
-        required=False
+        required=False,
     )
-    traitements = discord.ui.TextInput(label="Traitement(s) actuel(s)", placeholder="Oui / Non", required=False)
-    antecedents_chirurgicaux = discord.ui.TextInput(label="Antécédents chirurgicaux", placeholder="Oui / Non", required=False)
+    traitements = discord.ui.TextInput(
+        label="Traitement(s) actuel(s)", placeholder="Oui / Non", required=False
+    )
+    antecedents_chirurgicaux = discord.ui.TextInput(
+        label="Antécédents chirurgicaux", placeholder="Oui / Non", required=False
+    )
     taille = discord.ui.TextInput(label="Taille", placeholder="cm", required=False)
 
     def __init__(self, data: dict):
@@ -470,22 +443,29 @@ class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Ant
         self.data = data
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.data.update({
-            "allergies": self.allergies.value,
-            "maladies_chroniques": self.maladies_chroniques.value,
-            "traitements": self.traitements.value,
-            "antecedents_chirurgicaux": self.antecedents_chirurgicaux.value,
-            "taille": self.taille.value,
-        })
+        self.data.update(
+            {
+                "allergies": self.allergies.value,
+                "maladies_chroniques": self.maladies_chroniques.value,
+                "traitements": self.traitements.value,
+                "antecedents_chirurgicaux": self.antecedents_chirurgicaux.value,
+                "taille": self.taille.value,
+            }
+        )
         await interaction.response.send_modal(DossierMedicalModal3(self.data))
-
 
 class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Identité"):
     nom = discord.ui.TextInput(label="Nom & prénom", placeholder="Ex: Jean Dupont")
     age = discord.ui.TextInput(label="Âge", placeholder="Ex: 45")
-    sexe = discord.ui.TextInput(label="Sexe [M / F]", placeholder="M ou F", max_length=1)
-    date_visite = discord.ui.TextInput(label="Date de la visite", placeholder="JJ/MM/AAAA")
-    medecin_ems = discord.ui.TextInput(label="Médecin / EMS", placeholder="Nom du médecin ou service")
+    sexe = discord.ui.TextInput(
+        label="Sexe [M / F]", placeholder="M ou F", max_length=1
+    )
+    date_visite = discord.ui.TextInput(
+        label="Date de la visite", placeholder="JJ/MM/AAAA"
+    )
+    medecin_ems = discord.ui.TextInput(
+        label="Médecin / EMS", placeholder="Nom du médecin ou service"
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
         data = {
@@ -496,7 +476,6 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
             "medecin_ems": self.medecin_ems.value,
         }
         await interaction.response.send_modal(DossierMedicalModal2(data))
-
 
 # ---------- FORMULAIRE : MODIFICATION ----------
 _MODIF_LABELS = {
@@ -522,33 +501,44 @@ _MODIF_LABELS = {
     "nouvelle_signature": "Signature",
 }
 
-
-async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_nom: str, data: dict):
+async def _finaliser_modif_dossier(
+    interaction: discord.Interaction, ancien_nom: str, data: dict
+):
     updates = []
     for key, label in _MODIF_LABELS.items():
         value = data.get(key)
         if value:
-            suffix = " cm" if key == "nouvelle_taille" else (" kg" if key == "nouveau_poids" else "")
+            suffix = (
+                " cm"
+                if key == "nouvelle_taille"
+                else (" kg" if key == "nouveau_poids" else "")
+            )
             updates.append(f"**{label} :** {value}{suffix}")
 
     embed = discord.Embed(
         title="**__🩺 Modification du Dossier Médical__**",
         description=f"**Ancien dossier :** {ancien_nom}",
-        color=discord.Color.gold()
+        color=discord.Color.gold(),
     )
-
     if updates:
-        embed.add_field(name="**Modifications effectuées**", value="\n".join(updates), inline=False)
+        embed.add_field(
+            name="**Modifications effectuées**",
+            value="\n".join(updates),
+            inline=False,
+        )
     else:
-        embed.add_field(name="Aucune modification", value="Aucun champ n'a été modifié.", inline=False)
-
+        embed.add_field(
+            name="Aucune modification",
+            value="Aucun champ n'a été modifié.",
+            inline=False,
+        )
     embed.set_footer(text=f"Modifié par {interaction.user.display_name}")
-
     await interaction.response.send_message(embed=embed)
 
-
 class DossierModifierModal5(discord.ui.Modal, title="Modification (5/5) - Signature"):
-    nouvelle_signature = discord.ui.TextInput(label="Nouvelle Signature", placeholder="Nouvelle signature", required=False)
+    nouvelle_signature = discord.ui.TextInput(
+        label="Nouvelle Signature", placeholder="Nouvelle signature", required=False
+    )
 
     def __init__(self, ancien_nom: str, data: dict):
         super().__init__()
@@ -559,13 +549,28 @@ class DossierModifierModal5(discord.ui.Modal, title="Modification (5/5) - Signat
         self.data["nouvelle_signature"] = self.nouvelle_signature.value
         await _finaliser_modif_dossier(interaction, self.ancien_nom, self.data)
 
-
 class DossierModifierModal4(discord.ui.Modal, title="Modification (4/5) - Conclusion"):
-    nouvelle_vision = discord.ui.TextInput(label="Nouvelle Vision", placeholder="Normale / Corrigée / Trouble", required=False)
-    nouvelle_audition = discord.ui.TextInput(label="Nouvelle Audition", placeholder="Normale / Diminuée", required=False)
-    nouvelles_observations = discord.ui.TextInput(label="Nouvelles Observations", style=discord.TextStyle.paragraph, required=False)
-    nouvelle_aptitude = discord.ui.TextInput(label="Nouvelle Aptitude", placeholder="Patient apte / inapte", required=False)
-    nouvelles_recommandations = discord.ui.TextInput(label="Nouvelles Recommandations", placeholder="Nouvelles recommandations", required=False)
+    nouvelle_vision = discord.ui.TextInput(
+        label="Nouvelle Vision",
+        placeholder="Normale / Corrigée / Trouble",
+        required=False,
+    )
+    nouvelle_audition = discord.ui.TextInput(
+        label="Nouvelle Audition", placeholder="Normale / Diminuée", required=False
+    )
+    nouvelles_observations = discord.ui.TextInput(
+        label="Nouvelles Observations",
+        style=discord.TextStyle.paragraph,
+        required=False,
+    )
+    nouvelle_aptitude = discord.ui.TextInput(
+        label="Nouvelle Aptitude", placeholder="Patient apte / inapte", required=False
+    )
+    nouvelles_recommandations = discord.ui.TextInput(
+        label="Nouvelles Recommandations",
+        placeholder="Nouvelles recommandations",
+        required=False,
+    )
 
     def __init__(self, ancien_nom: str, data: dict):
         super().__init__()
@@ -573,22 +578,35 @@ class DossierModifierModal4(discord.ui.Modal, title="Modification (4/5) - Conclu
         self.data = data
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.data.update({
-            "nouvelle_vision": self.nouvelle_vision.value,
-            "nouvelle_audition": self.nouvelle_audition.value,
-            "nouvelles_observations": self.nouvelles_observations.value,
-            "nouvelle_aptitude": self.nouvelle_aptitude.value,
-            "nouvelles_recommandations": self.nouvelles_recommandations.value,
-        })
-        await interaction.response.send_modal(DossierModifierModal5(self.ancien_nom, self.data))
-
+        self.data.update(
+            {
+                "nouvelle_vision": self.nouvelle_vision.value,
+                "nouvelle_audition": self.nouvelle_audition.value,
+                "nouvelles_observations": self.nouvelles_observations.value,
+                "nouvelle_aptitude": self.nouvelle_aptitude.value,
+                "nouvelles_recommandations": self.nouvelles_recommandations.value,
+            }
+        )
+        await interaction.response.send_modal(
+            DossierModifierModal5(self.ancien_nom, self.data)
+        )
 
 class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen clinique"):
-    nouvelle_taille = discord.ui.TextInput(label="Nouvelle Taille", placeholder="cm", required=False)
-    nouveau_poids = discord.ui.TextInput(label="Nouveau Poids", placeholder="kg", required=False)
-    nouveau_groupe = discord.ui.TextInput(label="Nouveau Groupe sanguin", placeholder="Ex: A+", required=False)
-    nouveau_pouls = discord.ui.TextInput(label="Nouveau Pouls", placeholder="Normal / Rapide / Lent", required=False)
-    nouvelle_respiration = discord.ui.TextInput(label="Nouvelle Respiration", placeholder="Normale / Difficile", required=False)
+    nouvelle_taille = discord.ui.TextInput(
+        label="Nouvelle Taille", placeholder="cm", required=False
+    )
+    nouveau_poids = discord.ui.TextInput(
+        label="Nouveau Poids", placeholder="kg", required=False
+    )
+    nouveau_groupe = discord.ui.TextInput(
+        label="Nouveau Groupe sanguin", placeholder="Ex: A+", required=False
+    )
+    nouveau_pouls = discord.ui.TextInput(
+        label="Nouveau Pouls", placeholder="Normal / Rapide / Lent", required=False
+    )
+    nouvelle_respiration = discord.ui.TextInput(
+        label="Nouvelle Respiration", placeholder="Normale / Difficile", required=False
+    )
 
     def __init__(self, ancien_nom: str, data: dict):
         super().__init__()
@@ -596,22 +614,43 @@ class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen
         self.data = data
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.data.update({
-            "nouvelle_taille": self.nouvelle_taille.value,
-            "nouveau_poids": self.nouveau_poids.value,
-            "nouveau_groupe": self.nouveau_groupe.value,
-            "nouveau_pouls": self.nouveau_pouls.value,
-            "nouvelle_respiration": self.nouvelle_respiration.value,
-        })
-        await interaction.response.send_modal(DossierModifierModal4(self.ancien_nom, self.data))
-
+        self.data.update(
+            {
+                "nouvelle_taille": self.nouvelle_taille.value,
+                "nouveau_poids": self.nouveau_poids.value,
+                "nouveau_groupe": self.nouveau_groupe.value,
+                "nouveau_pouls": self.nouveau_pouls.value,
+                "nouvelle_respiration": self.nouvelle_respiration.value,
+            }
+        )
+        await interaction.response.send_modal(
+            DossierModifierModal4(self.ancien_nom, self.data)
+        )
 
 class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antécédents"):
-    nouveau_medecin = discord.ui.TextInput(label="Nouveau Médecin / EMS", placeholder="Nouveau médecin", required=False)
-    nouvelles_allergies = discord.ui.TextInput(label="Nouvelles Allergies", placeholder="Nouvelles allergies", style=discord.TextStyle.paragraph, required=False)
-    nouvelles_maladies = discord.ui.TextInput(label="Nouvelles Maladies chroniques", placeholder="Nouvelles maladies", style=discord.TextStyle.paragraph, required=False)
-    nouveaux_traitements = discord.ui.TextInput(label="Nouveaux Traitements", placeholder="Nouveaux traitements", required=False)
-    nouveaux_antecedents = discord.ui.TextInput(label="Nouveaux Antécédents chirurgicaux", placeholder="Nouveaux antécédents", required=False)
+    nouveau_medecin = discord.ui.TextInput(
+        label="Nouveau Médecin / EMS", placeholder="Nouveau médecin", required=False
+    )
+    nouvelles_allergies = discord.ui.TextInput(
+        label="Nouvelles Allergies",
+        placeholder="Nouvelles allergies",
+        style=discord.TextStyle.paragraph,
+        required=False,
+    )
+    nouvelles_maladies = discord.ui.TextInput(
+        label="Nouvelles Maladies chroniques",
+        placeholder="Nouvelles maladies",
+        style=discord.TextStyle.paragraph,
+        required=False,
+    )
+    nouveaux_traitements = discord.ui.TextInput(
+        label="Nouveaux Traitements", placeholder="Nouveaux traitements", required=False
+    )
+    nouveaux_antecedents = discord.ui.TextInput(
+        label="Nouveaux Antécédents chirurgicaux",
+        placeholder="Nouveaux antécédents",
+        required=False,
+    )
 
     def __init__(self, ancien_nom: str, data: dict):
         super().__init__()
@@ -619,22 +658,37 @@ class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antéc
         self.data = data
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.data.update({
-            "nouveau_medecin": self.nouveau_medecin.value,
-            "nouvelles_allergies": self.nouvelles_allergies.value,
-            "nouvelles_maladies": self.nouvelles_maladies.value,
-            "nouveaux_traitements": self.nouveaux_traitements.value,
-            "nouveaux_antecedents": self.nouveaux_antecedents.value,
-        })
-        await interaction.response.send_modal(DossierModifierModal3(self.ancien_nom, self.data))
-
+        self.data.update(
+            {
+                "nouveau_medecin": self.nouveau_medecin.value,
+                "nouvelles_allergies": self.nouvelles_allergies.value,
+                "nouvelles_maladies": self.nouvelles_maladies.value,
+                "nouveaux_traitements": self.nouveaux_traitements.value,
+                "nouveaux_antecedents": self.nouveaux_antecedents.value,
+            }
+        )
+        await interaction.response.send_modal(
+            DossierModifierModal3(self.ancien_nom, self.data)
+        )
 
 class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/5) - Identité"):
-    ancien_nom = discord.ui.TextInput(label="Ancien Nom & prénom", placeholder="Nom actuel dans le dossier", required=True)
-    nouveau_nom = discord.ui.TextInput(label="Nouveau Nom & prénom", placeholder="Nouveau nom", required=False)
-    nouveau_age = discord.ui.TextInput(label="Nouvel Âge", placeholder="Nouvel âge", required=False)
-    nouveau_sexe = discord.ui.TextInput(label="Nouveau Sexe [M/F]", placeholder="M ou F", max_length=1, required=False)
-    nouvelle_date = discord.ui.TextInput(label="Nouvelle Date de visite", placeholder="JJ/MM/AAAA", required=False)
+    ancien_nom = discord.ui.TextInput(
+        label="Ancien Nom & prénom",
+        placeholder="Nom actuel dans le dossier",
+        required=True,
+    )
+    nouveau_nom = discord.ui.TextInput(
+        label="Nouveau Nom & prénom", placeholder="Nouveau nom", required=False
+    )
+    nouveau_age = discord.ui.TextInput(
+        label="Nouvel Âge", placeholder="Nouvel âge", required=False
+    )
+    nouveau_sexe = discord.ui.TextInput(
+        label="Nouveau Sexe [M/F]", placeholder="M ou F", max_length=1, required=False
+    )
+    nouvelle_date = discord.ui.TextInput(
+        label="Nouvelle Date de visite", placeholder="JJ/MM/AAAA", required=False
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
         data = {
@@ -643,47 +697,81 @@ class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/5) - 
             "nouveau_sexe": self.nouveau_sexe.value,
             "nouvelle_date": self.nouvelle_date.value,
         }
-        await interaction.response.send_modal(DossierModifierModal2(self.ancien_nom.value, data))
-
+        await interaction.response.send_modal(
+            DossierModifierModal2(self.ancien_nom.value, data)
+        )
 
 # ---------- FORMULAIRE : RAPPORT INTERVENTION EMS ----------
-async def _finaliser_rapport_intervention(interaction: discord.Interaction, data: dict):
-    embed = discord.Embed(title="**__Rapport d'Intervention EMS__**", color=discord.Color.red())
-
+async def _finaliser_rapport_intervention(
+    interaction: discord.Interaction, data: dict
+):
+    embed = discord.Embed(
+        title="**__Rapport d'Intervention EMS__**", color=discord.Color.red()
+    )
     embed.add_field(name="**Date**", value=data["date"], inline=True)
     embed.add_field(name="**Heure d'appel**", value=data["heure_appel"], inline=True)
-    embed.add_field(name="**Heure d'arrivée sur les lieux**", value=data["heure_arrivee"], inline=True)
-    embed.add_field(name="**Heure de fin d'intervention**", value=data["heure_fin"], inline=True)
-    embed.add_field(name="**Nom(s) du/des EMS présent(s)**", value=data["ems_noms"], inline=True)
-
-    embed.add_field(name="\n```Lieu de l'intervention```", value=f"-> {data['lieu']}", inline=False)
-
-    embed.add_field(name="\n```Informations sur le patient```", value="\u200b", inline=False)
+    embed.add_field(
+        name="**Heure d'arrivée sur les lieux**",
+        value=data["heure_arrivee"],
+        inline=True,
+    )
+    embed.add_field(
+        name="**Heure de fin d'intervention**", value=data["heure_fin"], inline=True
+    )
+    embed.add_field(
+        name="**Nom(s) du/des EMS présent(s)**", value=data["ems_noms"], inline=True
+    )
+    embed.add_field(
+        name="\n```Lieu de l'intervention```", value=f"-> {data['lieu']}", inline=False
+    )
+    embed.add_field(
+        name="\n```Informations sur le patient```", value="\u200b", inline=False
+    )
     embed.add_field(name="Nom RP", value=data["patient_nom"], inline=True)
     embed.add_field(name="Sexe / Âge", value=data["patient_sexe_age"], inline=True)
-    embed.add_field(name="État à l'arrivée", value=data["patient_etat"], inline=False)
+    embed.add_field(
+        name="État à l'arrivée", value=data["patient_etat"], inline=False
+    )
 
     dossier = await get_dossier_personnel(data["patient_nom"])
     if dossier:
         embed.add_field(
             name="⚠️ Rappel dossier personnel",
             value=f"Groupe sanguin : **{dossier['groupe_sanguin'] or 'Inconnu'}**\nAllergies : **{dossier['allergies'] or 'Aucune'}**",
-            inline=False
+            inline=False,
         )
 
     embed.add_field(name="\n```Procédure effectuée```", value="\u200b", inline=False)
-    embed.add_field(name="Vérification des signes vitaux", value=data["signes_vitaux"], inline=True)
-    embed.add_field(name="Premiers soins", value=data["premiers_soins"] or "Aucun", inline=True)
-    embed.add_field(name="Stabilisation", value=data["stabilisation"] or "Aucune", inline=True)
+    embed.add_field(
+        name="Vérification des signes vitaux",
+        value=data["signes_vitaux"],
+        inline=True,
+    )
+    embed.add_field(
+        name="Premiers soins", value=data["premiers_soins"] or "Aucun", inline=True
+    )
+    embed.add_field(
+        name="Stabilisation", value=data["stabilisation"] or "Aucune", inline=True
+    )
     embed.add_field(name="Transport", value=data["transport"], inline=True)
-    embed.add_field(name="Destination", value=data["destination"] or "Non spécifiée", inline=True)
-
-    embed.add_field(name="\n```Observations complémentaires```", value=data["observations"] or "Aucune observation", inline=False)
-
-    embed.add_field(name="\n```Conclusion de l'intervention```", value=data["conclusion"], inline=False)
-
-    embed.add_field(name="\n**Signature du médecin / secouriste**", value=data["signature"] or "Non signé", inline=False)
-
+    embed.add_field(
+        name="Destination", value=data["destination"] or "Non spécifiée", inline=True
+    )
+    embed.add_field(
+        name="\n```Observations complémentaires```",
+        value=data["observations"] or "Aucune observation",
+        inline=False,
+    )
+    embed.add_field(
+        name="\n```Conclusion de l'intervention```",
+        value=data["conclusion"],
+        inline=False,
+    )
+    embed.add_field(
+        name="\n**Signature du médecin / secouriste**",
+        value=data["signature"] or "Non signé",
+        inline=False,
+    )
     embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
 
     record_id = await save_dossier_intervention(
@@ -697,10 +785,9 @@ async def _finaliser_rapport_intervention(interaction: discord.Interaction, data
         created_by_name=interaction.user.display_name,
     )
 
-    view = RapportReviewView(
-        embed=embed,
-        pdf_title="Rapport d'Intervention EMS",
-        pdf_fields=[
+    view = ExportPDFView(
+        title="Rapport d'Intervention EMS",
+        fields=[
             ("Date", data["date"]),
             ("Heure d'appel", data["heure_appel"]),
             ("Heure d'arrivée", data["heure_arrivee"]),
@@ -719,52 +806,58 @@ async def _finaliser_rapport_intervention(interaction: discord.Interaction, data
             ("Conclusion", data["conclusion"]),
             ("Signature", data["signature"] or "Non signé"),
         ],
-        pdf_filename=f"rapport_intervention_{record_id}.pdf",
-        pdf_footer=f"Rempli par {interaction.user.display_name} • Dossier n°{record_id}",
+        filename=f"rapport_intervention_{record_id}.pdf",
+        footer=f"Rempli par {interaction.user.display_name} • Dossier n°{record_id}",
     )
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
+    await interaction.response.send_message(embed=embed, view=view)
 
 class RapportInterventionModal4(discord.ui.Modal, title="Rapport EMS (4/4) - Conclusion"):
     conclusion = discord.ui.TextInput(
         label="Conclusion de l'intervention",
         placeholder="Patient stabilisé / transporté / décédé malgré les soins",
-        style=discord.TextStyle.paragraph
+        style=discord.TextStyle.paragraph,
     )
-    signature = discord.ui.TextInput(label="Signature du médecin / secouriste", placeholder="Signature", required=False)
+    signature = discord.ui.TextInput(
+        label="Signature du médecin / secouriste", placeholder="Signature", required=False
+    )
 
     def __init__(self, data: dict):
         super().__init__()
         self.data = data
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.data.update({
-            "conclusion": self.conclusion.value,
-            "signature": self.signature.value,
-        })
+        self.data.update(
+            {
+                "conclusion": self.conclusion.value,
+                "signature": self.signature.value,
+            }
+        )
         await _finaliser_rapport_intervention(interaction, self.data)
-
 
 class RapportInterventionModal3(discord.ui.Modal, title="Rapport EMS (3/4) - Procédure"):
     premiers_soins = discord.ui.TextInput(
         label="Premiers soins",
         placeholder="Massage cardiaque / Garrot / Pansement, etc.",
         style=discord.TextStyle.paragraph,
-        required=False
+        required=False,
     )
     stabilisation = discord.ui.TextInput(
         label="Stabilisation",
         placeholder="Oxygène / Médicaments / Défibrillateur",
         style=discord.TextStyle.paragraph,
-        required=False
+        required=False,
     )
     transport = discord.ui.TextInput(label="Transport", placeholder="Oui / Non")
-    destination = discord.ui.TextInput(label="Destination", placeholder="Central EMS / Hôpital / Autre", required=False)
+    destination = discord.ui.TextInput(
+        label="Destination",
+        placeholder="Central EMS / Hôpital / Autre",
+        required=False,
+    )
     observations = discord.ui.TextInput(
         label="Observations complémentaires",
         style=discord.TextStyle.paragraph,
         placeholder="Ex: Patient victime d'un accident, contusions, état stabilisé.",
-        required=False
+        required=False,
     )
 
     def __init__(self, data: dict):
@@ -772,26 +865,35 @@ class RapportInterventionModal3(discord.ui.Modal, title="Rapport EMS (3/4) - Pro
         self.data = data
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.data.update({
-            "premiers_soins": self.premiers_soins.value,
-            "stabilisation": self.stabilisation.value,
-            "transport": self.transport.value,
-            "destination": self.destination.value,
-            "observations": self.observations.value,
-        })
+        self.data.update(
+            {
+                "premiers_soins": self.premiers_soins.value,
+                "stabilisation": self.stabilisation.value,
+                "transport": self.transport.value,
+                "destination": self.destination.value,
+                "observations": self.observations.value,
+            }
+        )
         await interaction.response.send_modal(RapportInterventionModal4(self.data))
 
-
 class RapportInterventionModal2(discord.ui.Modal, title="Rapport EMS (2/4) - Patient"):
-    lieu = discord.ui.TextInput(label="Lieu de l'intervention", placeholder="Adresse ou lieu précis", style=discord.TextStyle.paragraph)
+    lieu = discord.ui.TextInput(
+        label="Lieu de l'intervention",
+        placeholder="Adresse ou lieu précis",
+        style=discord.TextStyle.paragraph,
+    )
     patient_nom = discord.ui.TextInput(label="Nom RP", placeholder="Nom et prénom")
-    patient_sexe_age = discord.ui.TextInput(label="Sexe / Âge", placeholder="M/F, âge")
+    patient_sexe_age = discord.ui.TextInput(
+        label="Sexe / Âge", placeholder="M/F, âge"
+    )
     patient_etat = discord.ui.TextInput(
         label="État à l'arrivée",
         placeholder="Inconscient / Conscient mais blessé / Hémorragie, etc.",
-        style=discord.TextStyle.paragraph
+        style=discord.TextStyle.paragraph,
     )
-    signes_vitaux = discord.ui.TextInput(label="Vérification des signes vitaux", placeholder="Oui / Non")
+    signes_vitaux = discord.ui.TextInput(
+        label="Vérification des signes vitaux", placeholder="Oui / Non"
+    )
 
     def __init__(self, data: dict, patient_name: str = None):
         super().__init__()
@@ -800,22 +902,29 @@ class RapportInterventionModal2(discord.ui.Modal, title="Rapport EMS (2/4) - Pat
             self.patient_nom.default = patient_name
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.data.update({
-            "lieu": self.lieu.value,
-            "patient_nom": self.patient_nom.value,
-            "patient_sexe_age": self.patient_sexe_age.value,
-            "patient_etat": self.patient_etat.value,
-            "signes_vitaux": self.signes_vitaux.value,
-        })
+        self.data.update(
+            {
+                "lieu": self.lieu.value,
+                "patient_nom": self.patient_nom.value,
+                "patient_sexe_age": self.patient_sexe_age.value,
+                "patient_etat": self.patient_etat.value,
+                "signes_vitaux": self.signes_vitaux.value,
+            }
+        )
         await interaction.response.send_modal(RapportInterventionModal3(self.data))
-
 
 class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Horaires"):
     date = discord.ui.TextInput(label="Date", placeholder="JJ/MM/AAAA")
     heure_appel = discord.ui.TextInput(label="Heure d'appel", placeholder="HH:MM")
-    heure_arrivee = discord.ui.TextInput(label="Heure d'arrivée sur les lieux", placeholder="HH:MM")
-    heure_fin = discord.ui.TextInput(label="Heure de fin d'intervention", placeholder="HH:MM")
-    ems_noms = discord.ui.TextInput(label="Nom(s) du/des EMS présent(s)", placeholder="Nom RP")
+    heure_arrivee = discord.ui.TextInput(
+        label="Heure d'arrivée sur les lieux", placeholder="HH:MM"
+    )
+    heure_fin = discord.ui.TextInput(
+        label="Heure de fin d'intervention", placeholder="HH:MM"
+    )
+    ems_noms = discord.ui.TextInput(
+        label="Nom(s) du/des EMS présent(s)", placeholder="Nom RP"
+    )
 
     def __init__(self, patient_name: str = None):
         super().__init__()
@@ -829,87 +938,11 @@ class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Hora
             "heure_fin": self.heure_fin.value,
             "ems_noms": self.ems_noms.value,
         }
-        await interaction.response.send_modal(RapportInterventionModal2(data, patient_name=self.patient_name))
+        await interaction.response.send_modal(
+            RapportInterventionModal2(data, patient_name=self.patient_name)
+        )
 
-
-# ---------- FACTURATION AVEC QUANTITÉ ET BROUILLON ----------
-FACTURATION_CATEGORIES = {
-    "soins_base": {
-        "label": "💉 Soins de base",
-        "items": {
-            "consultation": {"label": "Consultation / diagnostic", "prix": 500},
-            "petit_soin": {"label": "Petit soin (égratignure, douleur légère)", "prix": 550},
-            "soin_classique": {"label": "Soin classique (blessure modérée)", "prix": 1000},
-            "soin_lourd": {"label": "Soin lourd (fracture, tir, accident grave)", "prix": 1600}
-        }
-    },
-    "interventions": {
-        "label": "🏥 Interventions & urgences",
-        "items": {
-            "deplacement_ville": {"label": "Déplacement EMS en ville", "prix": 1250},
-            "deplacement_hors_ville": {"label": "Déplacement hors ville / zone dangereuse", "prix": 1400},
-            "urgence_haute": {"label": "Intervention urgente (priorité haute)", "prix": 1500},
-            "extraction_dangereuse": {"label": "Extraction en zone dangereuse (fusillade, etc.)", "prix": 1800}
-        }
-    },
-    "reanimation": {
-        "label": "⚡ Réanimation",
-        "items": {
-            "reanimation_simple": {"label": "Réanimation simple (sur place)", "prix": 1500},
-            "reanimation_transport": {"label": "Réanimation + transport hôpital", "prix": 1800},
-            "reanimation_dangereuse": {"label": "Réanimation en zone dangereuse", "prix": 10000}
-        }
-    },
-    "transport": {
-        "label": "🚑 Transport médical",
-        "items": {
-            "transport_hôpital": {"label": "Transport vers hôpital", "prix": 2200},
-            "transport_longue_distance": {"label": "Transport longue distance", "prix": 2400},
-            "escorte_medicale": {"label": "Escorte médicale (convoi, VIP, etc.)", "prix": 2700}
-        }
-    },
-    "services": {
-        "label": "💊 Services supplémentaires",
-        "items": {
-            "prescription": {"label": "Prescription médicaments", "prix": 500},
-            "kit_soin": {"label": "Kit de soin (bandage, médoc)", "prix": 550},
-            "certificat_medical": {"label": "Certificat médical RP", "prix": 500},
-            "test_alcool_drogue": {"label": "Test alcool / drogue RP", "prix": 500}
-        }
-    },
-    "psychotechnique": {
-        "label": "🔫 Test psychotechnique",
-        "items": {
-            "test_ppa": {"label": "Test psychotechnique standard (PPA)", "prix": 2000},
-            "repassage_test": {"label": "Repassage du test (échec)", "prix": 1000}
-        }
-    },
-    "visites": {
-        "label": "🩺 Visites médicales",
-        "items": {
-            "visite_standard": {"label": "Visite médicale standard", "prix": 1000},
-            "visite_approfondie": {"label": "Visite médicale approfondie", "prix": 1500},
-            "visite_professionnelle": {"label": "Visite médicale professionnelle (aptitude métier)", "prix": 1800}
-        }
-    },
-    "vaccination": {
-        "label": "💉 Vaccination",
-        "items": {
-            "vaccin_standard": {"label": "Vaccin standard (grippe, rappel, etc.)", "prix": 600},
-            "vaccin_obligatoire": {"label": "Vaccin obligatoire (schéma complet)", "prix": 1200},
-            "vaccin_urgence": {"label": "Vaccin urgence (épidémie, infection grave)", "prix": 1500},
-            "carnet_vaccination": {"label": "Carnet de vaccination RP", "prix": 300}
-        }
-    },
-    "maternite": {
-        "label": "👶 Maternité",
-        "items": {
-            "consultation_prenatale": {"label": "Consultation prénatale", "prix": 600},
-            "suivi_grossesse": {"label": "Suivi de grossesse complet", "prix": 2500},
-            "accouchement_standard": {"label": "Accouchement standard", "prix": 3000},
-            "accouchement_complication": {"label": "Accouchement sous complication", "prix": 4500},
-            "cesarienne": {"label": "Césarienne", "prix": 5500},
-            "suivi_post_natal": {"label": "Suivi post-natal (mère + enfant)", "prix": 800}
+# ---------- FACTURATION ET CATEGORIES ----------
 FACTURATION_CATEGORIES = {
     "soins_base": {
         "label": "💉 Soins de base",
@@ -988,28 +1021,31 @@ FACTURATION_CATEGORIES = {
     },
 }
 
-
 class FacturationSession:
     def __init__(self):
         self.total = 0
         self.details: List[str] = []
         self.patient_name: str = "Non renseigné"
 
-
-def build_facturation_embed(session: FacturationSession, note: Optional[str] = None) -> discord.Embed:
+def build_facturation_embed(
+    session: FacturationSession, note: Optional[str] = None
+) -> discord.Embed:
     embed = discord.Embed(title="🧾 Facturation EMS", color=discord.Color.green())
     embed.add_field(name="Patient", value=session.patient_name, inline=False)
     if session.details:
         embed.add_field(
-            name="Soins ajoutés", value="\n".join(f"• {d}" for d in session.details), inline=False
+            name="Soins ajoutés",
+            value="\n".join(f"• {d}" for d in session.details),
+            inline=False,
         )
-        embed.add_field(name="Total provisoire", value=f"**{session.total} $**", inline=False)
+        embed.add_field(
+            name="Total provisoire", value=f"**{session.total} $**", inline=False
+        )
     else:
         embed.description = "Aucun soin ajouté pour le moment."
     if note:
         embed.add_field(name="Étape actuelle", value=note, inline=False)
     return embed
-
 
 class FacturationCategorySelect(discord.ui.Select):
     def __init__(self, session: FacturationSession):
@@ -1018,7 +1054,9 @@ class FacturationCategorySelect(discord.ui.Select):
             discord.SelectOption(label=cat["label"][:100], value=key)
             for key, cat in FACTURATION_CATEGORIES.items()
         ]
-        super().__init__(placeholder="Choisis une catégorie de soins...", options=options)
+        super().__init__(
+            placeholder="Choisis une catégorie de soins...", options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
         cat_key = self.values[0]
@@ -1027,12 +1065,10 @@ class FacturationCategorySelect(discord.ui.Select):
         view = FacturationItemView(self.session, cat_key)
         await interaction.response.edit_message(embed=embed, view=view)
 
-
 class FacturationCategoryView(SafeView):
     def __init__(self, session: FacturationSession):
         super().__init__(timeout=180)
         self.add_item(FacturationCategorySelect(session))
-
 
 class FacturationItemSelect(discord.ui.Select):
     def __init__(self, session: FacturationSession, cat_key: str):
@@ -1053,13 +1089,22 @@ class FacturationItemSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         key = self.values[0]
         item = FACTURATION_CATEGORIES[self.cat_key]["items"][key]
-        await interaction.response.send_modal(QuantityModal(self.session, key, item, self.cat_key))
-
+        await interaction.response.send_modal(
+            QuantityModal(self.session, key, item, self.cat_key)
+        )
 
 class QuantityModal(discord.ui.Modal, title="Quantité du soin"):
-    quantite = discord.ui.TextInput(label="Combien de fois ?", placeholder="Ex: 2", default="1")
+    quantite = discord.ui.TextInput(
+        label="Combien de fois ?", placeholder="Ex: 2", default="1"
+    )
 
-    def __init__(self, session: FacturationSession, item_key: str, item_data: dict, cat_key: str):
+    def __init__(
+        self,
+        session: FacturationSession,
+        item_key: str,
+        item_data: dict,
+        cat_key: str,
+    ):
         super().__init__()
         self.session = session
         self.item_key = item_key
@@ -1075,19 +1120,22 @@ class QuantityModal(discord.ui.Modal, title="Quantité du soin"):
                 qte = 99
         except ValueError:
             qte = 1
-
         cout_total = self.item_data["prix"] * qte
         self.session.total += cout_total
-        self.session.details.append(f"**{qte}x** {self.item_data['label']} — {cout_total} $")
-
+        self.session.details.append(
+            f"**{qte}x** {self.item_data['label']} — {cout_total} $"
+        )
         embed = build_facturation_embed(self.session)
         view = FacturationSummaryView(self.session)
         await interaction.response.edit_message(embed=embed, view=view)
 
-
 class BackToCategoryButton(discord.ui.Button):
     def __init__(self, session: FacturationSession):
-        super().__init__(label="↩️ Changer de catégorie", style=discord.ButtonStyle.secondary, row=1)
+        super().__init__(
+            label="↩️ Changer de catégorie",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
         self.session = session
 
     async def callback(self, interaction: discord.Interaction):
@@ -1095,29 +1143,37 @@ class BackToCategoryButton(discord.ui.Button):
         view = FacturationCategoryView(self.session)
         await interaction.response.edit_message(embed=embed, view=view)
 
-
 class FacturationItemView(SafeView):
     def __init__(self, session: FacturationSession, cat_key: str):
         super().__init__(timeout=180)
         self.add_item(FacturationItemSelect(session, cat_key))
         self.add_item(BackToCategoryButton(session))
 
-
 class FacturationSummaryView(SafeView):
     def __init__(self, session: FacturationSession):
         super().__init__(timeout=180)
         self.session = session
 
-    @discord.ui.button(label="➕ Ajouter un autre soin", style=discord.ButtonStyle.secondary)
-    async def add_more(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="➕ Ajouter un autre soin", style=discord.ButtonStyle.secondary
+    )
+    async def add_more(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         embed = build_facturation_embed(self.session)
         view = FacturationCategoryView(self.session)
         await interaction.response.edit_message(embed=embed, view=view)
 
-    @discord.ui.button(label="✅ Terminer et facturer", style=discord.ButtonStyle.success)
-    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        detail_text = "\n".join(f"• {d}" for d in self.session.details) or "Aucun soin sélectionné"
-
+    @discord.ui.button(
+        label="✅ Terminer et facturer", style=discord.ButtonStyle.success
+    )
+    async def finish(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        detail_text = (
+            "\n".join(f"• {d}" for d in self.session.details)
+            or "Aucun soin sélectionné"
+        )
         record_id = await save_dossier_intervention(
             patient_name=self.session.patient_name,
             blessure="Facturation soins",
@@ -1128,104 +1184,74 @@ class FacturationSummaryView(SafeView):
             created_by=interaction.user.id,
             created_by_name=interaction.user.display_name,
         )
-
-        embed = discord.Embed(title="🧾 Facturation EMS", color=discord.Color.green())
+        embed = discord.Embed(title="🧾 Facturation finale", color=discord.Color.green())
         embed.add_field(name="Patient", value=self.session.patient_name, inline=False)
         embed.add_field(name="Soins effectués", value=detail_text, inline=False)
-        embed.add_field(name="Total", value=f"**{self.session.total} $**", inline=False)
-        embed.add_field(name="Statut du paiement", value="⏳ **En attente de règlement**", inline=False)
-        embed.set_footer(text=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}")
-
-        review_view = RapportReviewView(
-            embed=embed,
-            pdf_title="Facturation EMS",
-            pdf_fields=[
-                ("Patient", self.session.patient_name),
-                ("Soins effectués", detail_text), 
-                ("Total", f"{self.session.total} $"),
-                ("Statut", "En attente")
-            ],
-            pdf_filename=f"facturation_{record_id}.pdf",
-            pdf_footer=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}",
-            record_id=record_id,
-            is_facture=True
+        embed.add_field(
+            name="Total", value=f"**{self.session.total} $**", inline=False
         )
-        await interaction.response.edit_message(embed=embed, view=review_view)
+        embed.set_footer(
+            text=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}"
+        )
 
+        pdf_view = ExportPDFView(
+            title="Facturation EMS",
+            fields=[
+                ("Patient", self.session.patient_name),
+                ("Soins effectués", detail_text),
+                ("Total", f"{self.session.total} $"),
+            ],
+            filename=f"facturation_{record_id}.pdf",
+            footer=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}",
+        )
+        await interaction.response.edit_message(embed=embed, view=pdf_view)
 
-@bot.tree.command(name="facturation", description="Noter les soins effectués et calculer le prix total")
+@bot.tree.command(
+    name="facturation",
+    description="Noter les soins effectués et calculer le prix total",
+)
 @app_commands.describe(patient="Nom du patient")
 async def facturation(interaction: discord.Interaction, patient: str):
     session = FacturationSession()
     session.patient_name = patient
     dossier = await get_dossier_personnel(patient)
     if dossier:
-        session.patient_name = dossier['nom']
-    embed = build_facturation_embed(session, note="Choisis une catégorie de soins pour commencer.")
-    await interaction.response.send_message(embed=embed, view=FacturationCategoryView(session), ephemeral=True)
-
+        session.patient_name = dossier["nom"]
+    embed = build_facturation_embed(
+        session, note="Choisis une catégorie de soins pour commencer."
+    )
+    await interaction.response.send_message(
+        embed=embed, view=FacturationCategoryView(session)
+    )
 
 # ---------- COMMANDES SLASH ----------
-@bot.tree.command(name="analyse_groupe_sanguin", description="Lancer une analyse de groupe sanguin en laboratoire (30s à 2min)")
-@app_commands.describe(nom="Nom de famille du patient", prenom="Prénom du patient")
-async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, prenom: str):
-    patient_full = f"{prenom.capitalize()} {nom.capitalize()}"
-    duree_totale = random.randint(30, 120)
-    
-    embed_attente = discord.Embed(
-        title="🧪 Analyse sanguine en laboratoire",
-        description=f"Prélèvement en cours de traitement pour **{patient_full}**.\n\n⏳ **Statut :** Analyse des antigènes en cours...",
-        color=discord.Color.gold()
-    )
-    embed_attente.add_field(name="Temps estimé", value=f"~{duree_totale} secondes", inline=False)
-    embed_attente.set_footer(text=f"Lancé par {interaction.user.display_name}")
-
-    await interaction.response.send_message(embed=embed_attente)
-
-    temps_restant = duree_totale
-    while temps_restant > 0:
-        sleep_step = min(10, temps_restant)
-        await asyncio.sleep(sleep_step)
-        temps_restant -= sleep_step
-        
-        if temps_restant > 0:
-            embed_attente.description = f"Prélèvement en cours de traitement pour **{patient_full}**.\n\n⏳ **Statut :** Centrifugation & réactifs en cours ({temps_restant}s restantes)..."
-            try:
-                await interaction.edit_original_response(embed=embed_attente)
-            except discord.HTTPException:
-                pass
-
-    groupes_sanguins = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
-    groupe_trouve = random.choice(groupes_sanguins)
-
-    embed_resultat = discord.Embed(
-        title="🩸 Résultat de l'Analyse Sanguine",
-        color=discord.Color.red()
-    )
-    embed_resultat.add_field(name="Patient", value=patient_full, inline=True)
-    embed_resultat.add_field(name="Groupe sanguin", value=f"**{groupe_trouve}**", inline=True)
-    embed_resultat.set_footer(text=f"Laboratoire EMS • Analyse validée par {interaction.user.display_name}")
-
-    await interaction.edit_original_response(embed=embed_resultat)
-
-
-@bot.tree.command(name="nouveau_dossier", description="Créer un dossier médical complet (visite standard)")
+@bot.tree.command(
+    name="nouveau_dossier",
+    description="Créer un dossier médical complet (visite standard)",
+)
 async def dossier_medical_creer(interaction: discord.Interaction):
     await interaction.response.send_modal(DossierMedicalModal())
 
-
-@bot.tree.command(name="modif_dossier", description="Modifier un dossier médical existant")
+@bot.tree.command(
+    name="modif_dossier", description="Modifier un dossier médical existant"
+)
 async def dossier_medical_modifier(interaction: discord.Interaction):
     await interaction.response.send_modal(DossierMedicalModifierModal())
 
-
-@bot.tree.command(name="rapport_ems", description="Créer un rapport d'intervention EMS")
+@bot.tree.command(
+    name="rapport_ems", description="Créer un rapport d'intervention EMS"
+)
 @app_commands.describe(patient="Nom du patient (optionnel)")
-async def dossier_intervention(interaction: discord.Interaction, patient: Optional[str] = None):
-    await interaction.response.send_modal(RapportInterventionModal(patient_name=patient))
+async def dossier_intervention(
+    interaction: discord.Interaction, patient: Optional[str] = None
+):
+    await interaction.response.send_modal(
+        RapportInterventionModal(patient_name=patient)
+    )
 
-
-@bot.tree.command(name="dossier_voir", description="Consulter un dossier personnel par nom")
+@bot.tree.command(
+    name="dossier_voir", description="Consulter un dossier personnel par nom"
+)
 @app_commands.describe(nom="Nom du personnage")
 async def dossier_voir(interaction: discord.Interaction, nom: str):
     dossier = await get_dossier_personnel(nom)
@@ -1246,41 +1272,61 @@ async def dossier_voir(interaction: discord.Interaction, nom: str):
             )
             return
 
-    embed = discord.Embed(title=f"📋 Dossier — {dossier['nom']}", color=discord.Color.blue())
+    embed = discord.Embed(
+        title=f"📋 Dossier — {dossier['nom']}", color=discord.Color.blue()
+    )
     embed.add_field(name="Âge", value=dossier["age"] or "N/A", inline=True)
-    embed.add_field(name="Groupe sanguin", value=dossier["groupe_sanguin"] or "N/A", inline=True)
-    embed.add_field(name="Allergies / Antécédents", value=dossier["allergies"] or "Aucun", inline=False)
     embed.add_field(
-        name="Contact d'urgence", value=dossier["contact_urgence"] or "Non renseigné", inline=False
+        name="Groupe sanguin", value=dossier["groupe_sanguin"] or "N/A", inline=True
+    )
+    embed.add_field(
+        name="Allergies / Antécédents",
+        value=dossier["allergies"] or "Aucun",
+        inline=False,
+    )
+    embed.add_field(
+        name="Contact d'urgence",
+        value=dossier["contact_urgence"] or "Non renseigné",
+        inline=False,
     )
 
     interventions = await get_interventions_for_patient(dossier["nom"])
     if interventions:
         historique = "\n".join(
-            f"**#{i['id']}** — {i['blessure']} ({i['created_at'][:10]})" for i in interventions
+            f"**#{i['id']}** — {i['blessure']} ({i['created_at'][:10]})"
+            for i in interventions
         )
-        embed.add_field(name="Historique d'interventions (5 dernières)", value=historique, inline=False)
-
+        embed.add_field(
+            name="Historique d'interventions (5 dernières)",
+            value=historique,
+            inline=False,
+        )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
 @dossier_voir.autocomplete("nom")
-async def dossier_voir_nom_autocomplete(interaction: discord.Interaction, current: str):
+async def dossier_voir_nom_autocomplete(
+    interaction: discord.Interaction, current: str
+):
     if not current:
         dossiers = await list_all_personnel(25)
         return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
     resultats = await search_dossiers_personnel(current, 25)
     return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
 
-
-@bot.tree.command(name="dossier_liste", description="Lister les dernières interventions enregistrées")
+@bot.tree.command(
+    name="dossier_liste",
+    description="Lister les dernières interventions enregistrées",
+)
 async def dossier_liste(interaction: discord.Interaction):
     interventions = await list_recent_interventions()
     if not interventions:
-        await interaction.response.send_message("Aucune intervention enregistrée pour le moment.", ephemeral=True)
+        await interaction.response.send_message(
+            "Aucune intervention enregistrée pour le moment.", ephemeral=True
+        )
         return
-
-    embed = discord.Embed(title="🚑 Dernières interventions", color=discord.Color.orange())
+    embed = discord.Embed(
+        title="🚑 Dernières interventions", color=discord.Color.orange()
+    )
     for i in interventions:
         embed.add_field(
             name=f"#{i['id']} — {i['patient_name']}",
@@ -1289,100 +1335,251 @@ async def dossier_liste(interaction: discord.Interaction):
         )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
-@bot.tree.command(name="dossier_supprimer_intervention", description="Supprimer un dossier d'intervention par son numéro")
-@app_commands.describe(id="Le numéro du dossier (visible dans le pied de page ou /dossier_liste)")
+@bot.tree.command(
+    name="dossier_supprimer_intervention",
+    description="Supprimer un dossier d'intervention par son numéro",
+)
+@app_commands.describe(
+    id="Le numéro du dossier (visible dans le pied de page ou /dossier_liste)"
+)
 async def dossier_supprimer_intervention(interaction: discord.Interaction, id: int):
     success = await delete_intervention(id)
     if success:
-        await interaction.response.send_message(f"Dossier d'intervention n°{id} supprimé.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Dossier d'intervention n°{id} supprimé.", ephemeral=True
+        )
     else:
-        await interaction.response.send_message(f"Aucun dossier d'intervention n°{id} trouvé.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Aucun dossier d'intervention n°{id} trouvé.", ephemeral=True
+        )
 
-
-@bot.tree.command(name="dossier_supprimer_personnel", description="Supprimer le dossier personnel d'un personnage")
+@bot.tree.command(
+    name="dossier_supprimer_personnel",
+    description="Supprimer le dossier personnel d'un personnage",
+)
 @app_commands.describe(nom="Nom du personnage")
 async def dossier_supprimer_personnel(interaction: discord.Interaction, nom: str):
     success = await delete_dossier_personnel(nom)
     if success:
-        await interaction.response.send_message(f"Dossier personnel de {nom} supprimé.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Dossier personnel de {nom} supprimé.", ephemeral=True
+        )
     else:
-        await interaction.response.send_message(f"Aucun dossier trouvé pour {nom}.", ephemeral=True)
-
+        await interaction.response.send_message(
+            f"Aucun dossier trouvé pour {nom}.", ephemeral=True
+        )
 
 @dossier_supprimer_personnel.autocomplete("nom")
-async def dossier_supprimer_nom_autocomplete(interaction: discord.Interaction, current: str):
+async def dossier_supprimer_nom_autocomplete(
+    interaction: discord.Interaction, current: str
+):
     if not current:
         dossiers = await list_all_personnel(25)
         return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
     resultats = await search_dossiers_personnel(current, 25)
     return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
 
-
 # ---------- TRIAGE ----------
 TRIAGE_DATA = {
     "tete": {
         "label": "Tête",
         "cases": [
-            {"title": "Traumatisme crânien", "symptoms": "Choc à la tête, maux de tête intenses, vertiges, confusion", "soins": "Immobilisation du patient, surveillance neurologique rapprochée, TDM crânien.", "meds": "Antalgique léger (paracétamol), anti-nauséeux si vomissements.", "urgent": True},
-            {"title": "Plaie du cuir chevelu", "symptoms": "Saignement abondant, plaie ouverte", "soins": "Nettoyage de la plaie, points de suture si nécessaire, pansement compressif.", "meds": "Antiseptique local, antalgique simple."},
-            {"title": "Céphalée sévère / migraine", "symptoms": "Douleur pulsatile, sensibilité à la lumière", "soins": "Repos en environnement calme et sombre, surveillance de l'évolution.", "meds": "Antalgique, anti-inflammatoire, antiémétique si nausées."},
-            {"title": "Perte de connaissance brève", "symptoms": "Évanouissement, pâleur, retour à la conscience rapide", "soins": "Position latérale de sécurité, prise des constantes.", "meds": "Selon la cause identifiée."}
-        ]
+            {
+                "title": "Traumatisme crânien",
+                "symptoms": "Choc à la tête, maux de tête intenses, vertiges, confusion",
+                "soins": "Immobilisation du patient, surveillance neurologique rapprochée, TDM crânien.",
+                "meds": "Antalgique léger (paracétamol), anti-nauséeux si vomissements.",
+                "urgent": True,
+            },
+            {
+                "title": "Plaie du cuir chevelu",
+                "symptoms": "Saignement abondant, plaie ouverte",
+                "soins": "Nettoyage de la plaie, points de suture si nécessaire, pansement compressif.",
+                "meds": "Antiseptique local, antalgique simple.",
+            },
+            {
+                "title": "Céphalée sévère / migraine",
+                "symptoms": "Douleur pulsatile, sensibilité à la lumière",
+                "soins": "Repos en environnement calme et sombre, surveillance de l'évolution.",
+                "meds": "Antalgique, anti-inflammatoire, antiémétique si nausées.",
+            },
+            {
+                "title": "Perte de connaissance brève",
+                "symptoms": "Évanouissement, pâleur, retour à la conscience rapide",
+                "soins": "Position latérale de sécurité, prise des constantes.",
+                "meds": "Selon la cause identifiée.",
+            },
+        ],
     },
     "cou": {
         "label": "Cou",
         "cases": [
-            {"title": "Entorse cervicale / torticolis", "symptoms": "Douleur, raideur, mobilité réduite", "soins": "Pose d'un collier cervical souple, repos.", "meds": "Antalgique, décontractant musculaire."},
-            {"title": "Traumatisme cervical (accident)", "symptoms": "Douleur vive, engourdissement dans les bras", "soins": "Immobilisation stricte (collier rigide + plan dur), imagerie.", "meds": "Antalgique fort sous surveillance.", "urgent": True},
-            {"title": "Gêne respiratoire / gonflement", "symptoms": "Œdème visible, voix rauque, difficulté à respirer", "soins": "Surveillance des voies aériennes en priorité, oxygène si besoin.", "meds": "Corticoïde, antihistaminique si origine allergique.", "urgent": True}
-        ]
+            {
+                "title": "Entorse cervicale / torticolis",
+                "symptoms": "Douleur, raideur, mobilité réduite",
+                "soins": "Pose d'un collier cervical souple, repos.",
+                "meds": "Antalgique, décontractant musculaire.",
+            },
+            {
+                "title": "Traumatisme cervical (accident)",
+                "symptoms": "Douleur vive, engourdissement dans les bras",
+                "soins": "Immobilisation stricte (collier rigide + plan dur), imagerie.",
+                "meds": "Antalgique fort sous surveillance.",
+                "urgent": True,
+            },
+            {
+                "title": "Gêne respiratoire / gonflement",
+                "symptoms": "Œdème visible, voix rauque, difficulté à respirer",
+                "soins": "Surveillance des voies aériennes en priorité, oxygène si besoin.",
+                "meds": "Corticoïde, antihistaminique si origine allergique.",
+                "urgent": True,
+            },
+        ],
     },
     "thorax": {
         "label": "Thorax",
         "cases": [
-            {"title": "Douleur thoracique (suspicion cardiaque)", "symptoms": "Oppression, douleur irradiant dans le bras ou la mâchoire", "soins": "ECG immédiat, monitoring cardiaque continu, oxygène.", "meds": "Aspirine, dérivé nitré, antalgique.", "urgent": True},
-            {"title": "Fracture de côte", "symptoms": "Douleur à l'inspiration, point douloureux localisé", "soins": "Contention légère, kinésithérapie respiratoire.", "meds": "Antalgique, anti-inflammatoire."},
-            {"title": "Crise d'asthme / gêne respiratoire", "symptoms": "Sifflement, essoufflement, toux", "soins": "Position assise, oxygène, nébulisation.", "meds": "Bronchodilatateur, corticoïde inhalé."}
-        ]
+            {
+                "title": "Douleur thoracique (suspicion cardiaque)",
+                "symptoms": "Oppression, douleur irradiant dans le bras ou la mâchoire",
+                "soins": "ECG immédiat, monitoring cardiaque continu, oxygène.",
+                "meds": "Aspirine, dérivé nitré, antalgique.",
+                "urgent": True,
+            },
+            {
+                "title": "Fracture de côte",
+                "symptoms": "Douleur à l'inspiration, point douloureux localisé",
+                "soins": "Contention légère, kinésithérapie respiratoire.",
+                "meds": "Antalgique, anti-inflammatoire.",
+            },
+            {
+                "title": "Crise d'asthme / gêne respiratoire",
+                "symptoms": "Sifflement, essoufflement, toux",
+                "soins": "Position assise, oxygène, nébulisation.",
+                "meds": "Bronchodilatateur, corticoïde inhalé.",
+            },
+        ],
     },
     "abdomen": {
         "label": "Abdomen",
         "cases": [
-            {"title": "Douleur abdominale aiguë", "symptoms": "Douleur localisée (souvent en bas à droite), fièvre", "soins": "Échographie ou scanner abdominal, surveillance, jeûne.", "meds": "Antalgique, antibiotique si infection.", "urgent": True},
-            {"title": "Plaie pénétrante abdominale", "symptoms": "Plaie ouverte, saignement, signes de choc possibles", "soins": "Compression de la plaie, pose de perfusion, transfert rapide.", "meds": "Antibiotique à large spectre, antalgique fort.", "urgent": True},
-            {"title": "Gastro-entérite", "symptoms": "Vomissements, diarrhée, signes de déshydratation", "soins": "Réhydratation (orale ou par perfusion), repos digestif.", "meds": "Anti-nauséeux, solution de réhydratation orale."}
-        ]
+            {
+                "title": "Douleur abdominale aiguë",
+                "symptoms": "Douleur localisée (souvent en bas à droite), fièvre",
+                "soins": "Échographie ou scanner abdominal, surveillance, jeûne.",
+                "meds": "Antalgique, antibiotique si infection.",
+                "urgent": True,
+            },
+            {
+                "title": "Plaie pénétrante abdominale",
+                "symptoms": "Plaie ouverte, saignement, signes de choc possibles",
+                "soins": "Compression de la plaie, pose de perfusion, transfert rapide.",
+                "meds": "Antibiotique à large spectre, antalgique fort.",
+                "urgent": True,
+            },
+            {
+                "title": "Gastro-entérite",
+                "symptoms": "Vomissements, diarrhée, signes de déshydratation",
+                "soins": "Réhydratation (orale ou par perfusion), repos digestif.",
+                "meds": "Anti-nauséeux, solution de réhydratation orale.",
+            },
+        ],
     },
     "bras": {
         "label": "Bras",
         "cases": [
-            {"title": "Fracture du bras / poignet", "symptoms": "Douleur, déformation visible, impossibilité de bouger", "soins": "Immobilisation par attelle ou plâtre, radiographie.", "meds": "Antalgique, anti-inflammatoire."},
-            {"title": "Coupure / plaie superficielle", "symptoms": "Saignement modéré, plaie propre ou souillée", "soins": "Nettoyage, suture si profonde, pansement.", "meds": "Antiseptique local, antalgique léger."},
-            {"title": "Brûlure", "symptoms": "Rougeur, cloques, douleur au contact", "soins": "Refroidissement immédiat à l'eau tempérée, pansement stérile.", "meds": "Crème cicatrisante, antalgique."}
-        ]
+            {
+                "title": "Fracture du bras / poignet",
+                "symptoms": "Douleur, déformation visible, impossibilité de bouger",
+                "soins": "Immobilisation par attelle ou plâtre, radiographie.",
+                "meds": "Antalgique, anti-inflammatoire.",
+            },
+            {
+                "title": "Coupure / plaie superficielle",
+                "symptoms": "Saignement modéré, plaie propre ou souillée",
+                "soins": "Nettoyage, suture si profonde, pansement.",
+                "meds": "Antiseptique local, antalgique léger.",
+            },
+            {
+                "title": "Brûlure",
+                "symptoms": "Rougeur, cloques, douleur au contact",
+                "soins": "Refroidissement immédiat à l'eau tempérée, pansement stérile.",
+                "meds": "Crème cicatrisante, antalgique.",
+            },
+        ],
     },
     "jambes": {
         "label": "Jambes",
         "cases": [
-            {"title": "Entorse de la cheville", "symptoms": "Gonflement, douleur, difficulté à marcher", "soins": "Protocole RICE (repos, glace, compression, élévation).", "meds": "Anti-inflammatoire, antalgique."},
-            {"title": "Fracture de jambe", "symptoms": "Douleur intense, déformation visible", "soins": "Immobilisation, radiographie, chirurgie parfois nécessaire.", "meds": "Antalgique fort, anticoagulant préventif.", "urgent": True},
-            {"title": "Suspicion de phlébite", "symptoms": "Jambe gonflée, chaude et douloureuse", "soins": "Échographie doppler, surveillance rapprochée.", "meds": "Anticoagulant.", "urgent": True}
-        ]
+            {
+                "title": "Entorse de la cheville",
+                "symptoms": "Gonflement, douleur, difficulté à marcher",
+                "soins": "Protocole RICE (repos, glace, compression, élévation).",
+                "meds": "Anti-inflammatoire, antalgique.",
+            },
+            {
+                "title": "Fracture de jambe",
+                "symptoms": "Douleur intense, déformation visible",
+                "soins": "Immobilisation, radiographie, chirurgie parfois nécessaire.",
+                "meds": "Antalgique fort, anticoagulant préventif.",
+                "urgent": True,
+            },
+            {
+                "title": "Suspicion de phlébite",
+                "symptoms": "Jambe gonflée, chaude et douloureuse",
+                "soins": "Échographie doppler, surveillance rapprochée.",
+                "meds": "Anticoagulant.",
+                "urgent": True,
+            },
+        ],
     },
     "vitaux": {
         "label": "Signes Vitaux",
         "cases": [
-            {"title": "Tachycardie", "symptoms": "Pouls rapide (>100 bpm), palpitations, parfois vertiges", "soins": "Mise au repos, monitoring cardiaque, ECG.", "meds": "Bêta-bloquant si indiqué.", "urgent": True},
-            {"title": "Bradycardie", "symptoms": "Pouls lent (<60 bpm), fatigue, sensation de malaise", "soins": "Monitoring cardiaque, ECG, surveillance tension.", "meds": "Atropine si symptomatique.", "urgent": True},
-            {"title": "Pouls faible / filant", "symptoms": "Pouls difficile à percevoir, peau pâle et moite", "soins": "Position allongée jambes surélevées, oxygène, perfusion.", "meds": "Remplissage vasculaire.", "urgent": True},
-            {"title": "Hypotension artérielle", "symptoms": "Vertiges, vision trouble, faiblesse, pâleur", "soins": "Position allongée jambes surélevées, surveillance.", "meds": "Perfusion si sévère."},
-            {"title": "Hypertension artérielle sévère", "symptoms": "Maux de tête intenses, bourdonnements, vision floue", "soins": "Repos au calme, surveillance tension, ECG.", "meds": "Antihypertenseur.", "urgent": True},
-            {"title": "Détresse respiratoire / hypoxie", "symptoms": "Essoufflement marqué, lèvres bleutées, confusion", "soins": "Position assise, oxygène à haut débit, surveillance saturation.", "meds": "Bronchodilatateur, oxygénothérapie.", "urgent": True}
-        ]
-    }
+            {
+                "title": "Tachycardie",
+                "symptoms": "Pouls rapide (>100 bpm), palpitations, parfois vertiges",
+                "soins": "Mise au repos, monitoring cardiaque, ECG.",
+                "meds": "Bêta-bloquant si indiqué.",
+                "urgent": True,
+            },
+            {
+                "title": "Bradycardie",
+                "symptoms": "Pouls lent (<60 bpm), fatigue, sensation de malaise",
+                "soins": "Monitoring cardiaque, ECG, surveillance tension.",
+                "meds": "Atropine si symptomatique.",
+                "urgent": True,
+            },
+            {
+                "title": "Pouls faible / filant",
+                "symptoms": "Pouls difficile à percevoir, peau pâle et moite",
+                "soins": "Position allongée jambes surélevées, oxygène, perfusion.",
+                "meds": "Remplissage vasculaire.",
+                "urgent": True,
+            },
+            {
+                "title": "Hypotension artérielle",
+                "symptoms": "Vertiges, vision trouble, faiblesse, pâleur",
+                "soins": "Position allongée jambes surélevées, surveillance.",
+                "meds": "Perfusion si sévère.",
+            },
+            {
+                "title": "Hypertension artérielle sévère",
+                "symptoms": "Maux de tête intenses, bourdonnements, vision floue",
+                "soins": "Repos au calme, surveillance tension, ECG.",
+                "meds": "Antihypertenseur.",
+                "urgent": True,
+            },
+            {
+                "title": "Détresse respiratoire / hypoxie",
+                "symptoms": "Essoufflement marqué, lèvres bleutées, confusion",
+                "soins": "Position assise, oxygène à haut débit, surveillance saturation.",
+                "meds": "Bronchodilatateur, oxygénothérapie.",
+                "urgent": True,
+            },
+        ],
+    },
 }
-
 
 ZONE_SHAPES = {
     "tete": [("ellipse", 100, 42, 30)],
@@ -1391,7 +1588,7 @@ ZONE_SHAPES = {
     "abdomen": [("rect", 68, 178, 64, 60)],
     "bras": [("rect", 26, 98, 30, 130), ("rect", 144, 98, 30, 130)],
     "jambes": [("rect", 70, 242, 26, 150), ("rect", 104, 242, 26, 150)],
-    "vitaux": [("rect", 62, 94, 76, 80)]
+    "vitaux": [("rect", 62, 94, 76, 80)],
 }
 
 BASE_FILL = (47, 143, 209, 45)
@@ -1400,13 +1597,11 @@ HL_FILL = (92, 179, 238, 255)
 HL_STROKE = (255, 255, 255, 255)
 BG_COLOR = (16, 30, 51, 255)
 
-
 def generate_body_image(highlight: str = None) -> io.BytesIO:
     scale = 3
     w, h = 200 * scale, 420 * scale
     img = Image.new("RGBA", (w, h), BG_COLOR)
     draw = ImageDraw.Draw(img)
-
     for zone_key, shapes in ZONE_SHAPES.items():
         is_hl = zone_key == highlight
         fill = HL_FILL if is_hl else BASE_FILL
@@ -1417,19 +1612,26 @@ def generate_body_image(highlight: str = None) -> io.BytesIO:
             if kind == "ellipse":
                 _, cx, cy, r = shape
                 cx, cy, r = cx * scale, cy * scale, r * scale
-                draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill, outline=stroke, width=width)
+                draw.ellipse(
+                    [cx - r, cy - r, cx + r, cy + r],
+                    fill=fill,
+                    outline=stroke,
+                    width=width,
+                )
             else:
                 _, x, y, ww, hh = shape
                 x, y, ww, hh = x * scale, y * scale, ww * scale, hh * scale
                 draw.rounded_rectangle(
-                    [x, y, x + ww, y + hh], radius=10 * scale, fill=fill, outline=stroke, width=width
+                    [x, y, x + ww, y + hh],
+                    radius=10 * scale,
+                    fill=fill,
+                    outline=stroke,
+                    width=width,
                 )
-
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf
-
 
 def build_case_embed(zone_key: str, case: dict) -> discord.Embed:
     title = case["title"]
@@ -1445,7 +1647,6 @@ def build_case_embed(zone_key: str, case: dict) -> discord.Embed:
     embed.add_field(name="Médicaments", value=case["meds"], inline=False)
     embed.set_footer(text="Contenu fictif pour RP — pas un guide médical réel")
     return embed
-
 
 class CaseSelect(discord.ui.Select):
     def __init__(self, zone_key: str):
@@ -1468,7 +1669,6 @@ class CaseSelect(discord.ui.Select):
         embed = build_case_embed(self.zone_key, case)
         await interaction.response.edit_message(embed=embed, view=self.view)
 
-
 class CaseView(SafeView):
     def __init__(self, zone_key: str):
         super().__init__(timeout=120)
@@ -1476,7 +1676,6 @@ class CaseView(SafeView):
         self.add_item(CaseSelect(zone_key))
         self.add_item(RandomCaseButton(zone_key))
         self.add_item(BackToZoneButton())
-
 
 class RandomCaseButton(discord.ui.Button):
     def __init__(self, zone_key: str):
@@ -1486,12 +1685,15 @@ class RandomCaseButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         case = random.choice(TRIAGE_DATA[self.zone_key]["cases"])
         embed = build_case_embed(self.zone_key, case)
-        await interaction.response.edit_message(embed=embed, view=CaseView(self.zone_key))
-
+        await interaction.response.edit_message(
+            embed=embed, view=CaseView(self.zone_key)
+        )
 
 class BackToZoneButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="⬅ Changer de zone", style=discord.ButtonStyle.secondary)
+        super().__init__(
+            label="⬅ Changer de zone", style=discord.ButtonStyle.secondary
+        )
 
     async def callback(self, interaction: discord.Interaction):
         embed = discord.Embed(
@@ -1501,8 +1703,9 @@ class BackToZoneButton(discord.ui.Button):
         )
         file = discord.File(generate_body_image(), filename="body.png")
         embed.set_image(url="attachment://body.png")
-        await interaction.response.edit_message(embed=embed, view=ZoneView(), attachments=[file])
-
+        await interaction.response.edit_message(
+            embed=embed, view=ZoneView(), attachments=[file]
+        )
 
 class ZoneSelect(discord.ui.Select):
     def __init__(self):
@@ -1510,7 +1713,9 @@ class ZoneSelect(discord.ui.Select):
             discord.SelectOption(label=data["label"], value=key)
             for key, data in TRIAGE_DATA.items()
         ]
-        super().__init__(placeholder="Choisis une zone du corps...", options=options)
+        super().__init__(
+            placeholder="Choisis une zone du corps...", options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
         zone_key = self.values[0]
@@ -1521,16 +1726,18 @@ class ZoneSelect(discord.ui.Select):
         )
         file = discord.File(generate_body_image(zone_key), filename="body.png")
         embed.set_image(url="attachment://body.png")
-        await interaction.response.edit_message(embed=embed, view=CaseView(zone_key), attachments=[file])
-
+        await interaction.response.edit_message(
+            embed=embed, view=CaseView(zone_key), attachments=[file]
+        )
 
 class ZoneView(SafeView):
     def __init__(self):
         super().__init__(timeout=120)
         self.add_item(ZoneSelect())
 
-
-@bot.tree.command(name="triage", description="Outil de triage RP : zone du corps -> cas -> soins")
+@bot.tree.command(
+    name="triage", description="Outil de triage RP : zone du corps -> cas -> soins"
+)
 async def triage(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🩺 Fiche de Triage",
@@ -1540,15 +1747,15 @@ async def triage(interaction: discord.Interaction):
     embed.set_footer(text="Contenu fictif pour RP — pas un guide médical réel")
     file = discord.File(generate_body_image(), filename="body.png")
     embed.set_image(url="attachment://body.png")
-    await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
-
+    await interaction.response.send_message(
+        embed=embed, view=ZoneView(), file=file, ephemeral=True
+    )
 
 # ---------- DÉMARRAGE ----------
 @bot.event
 async def on_ready():
     await init_db()
     logger.info(f"Connecté en tant que {bot.user}")
-
     try:
         guild = bot.get_guild(1531443088151543858)
         if guild:
@@ -1557,8 +1764,9 @@ async def on_ready():
             logger.info(f"✅ Commandes synchronisées sur le serveur : {guild.name}")
             print(f"✅ Commandes synchronisées sur le serveur : {guild.name}")
         else:
-            logger.warning("⚠️ Le bot n'a pas trouvé le serveur avec l'ID 1531443088151543858.")
-
+            logger.warning(
+                "⚠️ Le bot n'a pas trouvé le serveur avec l'ID 1531443088151543858."
+            )
         logger.info("✅ Démarrage terminé.")
     except Exception as e:
         logger.error(f"❌ Erreur critique lors du sync : {e}")
