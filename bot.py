@@ -197,29 +197,46 @@ async def list_all_personnel(limit: int = 50) -> List[dict]:
             return [dict(r) for r in rows]
 
 # ---------- EXPORT PDF ----------
+import textwrap 
+
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
     pdf = FPDF()
-    # Active le saut de page automatique pour éviter l'erreur 'Not enough height'
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     
+    epw = pdf.epw
+
+    def clean_text(text: str, max_word_len: int = 40) -> str:
+        if not text:
+            return "Non renseigné"
+        words = str(text).strip().split(" ")
+        cleaned = []
+        for word in words:
+            if len(word) > max_word_len:
+                word = " ".join(textwrap.wrap(word, max_word_len))
+            cleaned.append(word)
+        return " ".join(cleaned)
+
+    pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "B", 16)
-    pdf.multi_cell(0, 10, title)
+    pdf.multi_cell(epw, 10, clean_text(title), new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
     
     for label, value in fields:
+        pdf.set_x(pdf.l_margin)
         pdf.set_font("Helvetica", "B", 12)
-        pdf.multi_cell(0, 7, f"{label} :")
-        pdf.set_font("Helvetica", "", 12)
+        pdf.multi_cell(epw, 7, f"{clean_text(label)} :", new_x="LMARGIN", new_y="NEXT")
         
-        val_str = str(value).strip() if value else "Non renseigné"
-        pdf.multi_cell(0, 7, val_str)
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.multi_cell(epw, 7, clean_text(value), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(2)
         
     if footer:
+        pdf.set_x(pdf.l_margin)
         pdf.set_font("Helvetica", "I", 9)
         pdf.ln(4)
-        pdf.multi_cell(0, 5, footer)
+        pdf.multi_cell(epw, 5, clean_text(footer), new_x="LMARGIN", new_y="NEXT")
         
     raw_output = pdf.output()
     if isinstance(raw_output, str):
@@ -230,6 +247,7 @@ def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesI
     buf = io.BytesIO(raw_output)
     buf.seek(0)
     return buf
+
 
 class SafeView(discord.ui.View):
     async def on_error(
