@@ -910,26 +910,82 @@ FACTURATION_CATEGORIES = {
             "accouchement_complication": {"label": "Accouchement sous complication", "prix": 4500},
             "cesarienne": {"label": "Césarienne", "prix": 5500},
             "suivi_post_natal": {"label": "Suivi post-natal (mère + enfant)", "prix": 800}
-        }
+FACTURATION_CATEGORIES = {
+    "soins_base": {
+        "label": "💉 Soins de base",
+        "items": {
+            "consultation": {"label": "Consultation / Diagnostic", "prix": 500},
+            "petit_soin": {"label": "Soin léger (égratignure, hématome)", "prix": 550},
+            "soin_classique": {"label": "Soin classique (plaie modérée, brûlure)", "prix": 1000},
+            "soin_lourd": {"label": "Soin lourd (fracture, blessure par balle)", "prix": 1600},
+        },
+    },
+    "interventions": {
+        "label": "🏥 Interventions & Urgences",
+        "items": {
+            "intervention_urgente": {"label": "Intervention urgente sur site", "prix": 1500},
+            "extraction_dangereuse": {"label": "Extraction en zone dangereuse (fusillade)", "prix": 1800},
+            "reanimation_simple": {"label": "Réanimation sur place", "prix": 1500},
+            "reanimation_dangereuse": {"label": "Réanimation en zone à haut risque", "prix": 10000},
+        },
+    },
+    "transport": {
+        "label": "🚑 Transport médical",
+        "items": {
+            "transport_standard": {"label": "Transport ambulance (ville / hôpital)", "prix": 1250},
+            "transport_urgence": {"label": "Transport d'urgence / Zone à risque", "prix": 1800},
+            "transport_longue_distance": {"label": "Transport longue distance / Hors ville", "prix": 2400},
+            "escorte_medicale": {"label": "Escorte médicale (convoi / VIP)", "prix": 2700},
+            "transport_morgue": {"label": "Transport de corps (morgue)", "prix": 1500},
+        },
+    },
+    "visites_tests": {
+        "label": "🩺 Visites & Tests",
+        "items": {
+            "visite_standard": {"label": "Visite médicale standard", "prix": 1000},
+            "visite_approfondie": {"label": "Visite médicale approfondie", "prix": 1500},
+            "visite_professionnelle": {"label": "Visite d'aptitude professionnelle", "prix": 1800},
+            "test_ppa": {"label": "Test psychotechnique (PPA)", "prix": 2000},
+            "repassage_test": {"label": "Rattrapage test PPA", "prix": 1000},
+        },
+    },
+    "pharmacie_services": {
+        "label": "💊 Pharmacie & Services",
+        "items": {
+            "prescription": {"label": "Ordonnance / Prescription", "prix": 500},
+            "kit_soin": {"label": "Kit de soin / Bandages", "prix": 550},
+            "certificat_medical": {"label": "Certificat médical RP", "prix": 500},
+            "test_depistage": {"label": "Test alcool / drogue RP", "prix": 500},
+            "vaccin_standard": {"label": "Vaccin standard / Rappel", "prix": 600},
+            "vaccin_obligatoire": {"label": "Vaccination schéma complet", "prix": 1200},
+            "carnet_vaccination": {"label": "Carnet de vaccination RP", "prix": 300},
+        },
+    },
+    "maternite": {
+        "label": "👶 Maternité",
+        "items": {
+            "consultation_prenatale": {"label": "Consultation prénatale / Post-natale", "prix": 600},
+            "suivi_grossesse": {"label": "Suivi de grossesse complet", "prix": 2500},
+            "accouchement_standard": {"label": "Accouchement standard", "prix": 3000},
+            "accouchement_complication": {"label": "Accouchement complexe / Césarienne", "prix": 4500},
+        },
     },
     "fin_de_vie": {
-        "label": "⚰️ Fin de vie / soins palliatifs",
+        "label": "⚰️ Fin de vie & Légale",
         "items": {
-            "accompagnement_fin_vie": {"label": "Accompagnement fin de vie", "prix": 2000},
-            "soins_palliatifs": {"label": "Soins palliatifs complets", "prix": 4000},
+            "accompagnement_fin_vie": {"label": "Accompagnement & Soins palliatifs", "prix": 2000},
             "constat_deces": {"label": "Constat de décès RP", "prix": 1000},
-            "transport_corps": {"label": "Transport corps (morgue)", "prix": 1500}
-        }
+        },
     },
     "assistance": {
-        "label": "🧑‍⚕️ Assistance médicale",
+        "label": "🧑‍⚕️ Assistance & Dispositifs",
         "items": {
-            "assistance_evenement": {"label": "Assistance médicale sur événement", "prix": 3000},
-            "presence_operation": {"label": "Présence médecin sur opération spéciale", "prix": 3500},
-            "support_zone_dangereuse": {"label": "Support médical en zone dangereuse", "prix": 5000},
-            "assistance_longue_duree": {"label": "Assistance longue durée (contrat RP)", "prix": 8000}
-        }
-    }
+            "assistance_evenement": {"label": "Dispositif médical sur événement", "prix": 3000},
+            "presence_operation": {"label": "Assistance opération spéciale", "prix": 3500},
+            "support_zone_dangereuse": {"label": "Support en zone dangereuse", "prix": 5000},
+            "assistance_longue_duree": {"label": "Contrat d'assistance longue durée", "prix": 8000},
+        },
+    },
 }
 
 
