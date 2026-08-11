@@ -7,6 +7,8 @@ from typing import Optional, List
 
 import aiosqlite
 import discord
+import random
+import asyncio
 from discord import app_commands
 from discord.ext import commands
 from fpdf import FPDF
@@ -1149,6 +1151,49 @@ async def dossier_supprimer_nom_autocomplete(interaction: discord.Interaction, c
     resultats = await search_dossiers_personnel(current, 25)
     return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
 
+@bot.tree.command(name="analyse_groupe_sanguin", description="Lancer une analyse de groupe sanguin en laboratoire (30s à 2min)")
+@app_commands.describe(nom="Nom de famille du patient", prenom="Prénom du patient")
+async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, prenom: str):
+    patient_full = f"{prenom.capitalize()} {nom.capitalize()}"
+    duree_totale = random.randint(30, 120)  # Décompte aléatoire entre 30s et 120s
+    
+    embed_attente = discord.Embed(
+        title="🧪 Analyse sanguine en laboratoire",
+        description=f"Prélèvement en cours de traitement pour **{patient_full}**.\n\n⏳ **Statut :** Analyse des antigènes en cours...",
+        color=discord.Color.gold()
+    )
+    embed_attente.add_field(name="Temps estimé", value=f"~{duree_totale} secondes", inline=False)
+    embed_attente.set_footer(text=f"Lancé par {interaction.user.display_name}")
+
+    await interaction.response.send_message(embed=embed_attente)
+
+    # Décompte progressif mis à jour toutes les 10s pour respecter les limites Discord
+    temps_restant = duree_totale
+    while temps_restant > 0:
+        sleep_step = min(10, temps_restant)
+        await asyncio.sleep(sleep_step)
+        temps_restant -= sleep_step
+        
+        if temps_restant > 0:
+            embed_attente.description = f"Prélèvement en cours de traitement pour **{patient_full}**.\n\n⏳ **Statut :** Centrifugation & réactifs en cours ({temps_restant}s restantes)..."
+            try:
+                await interaction.edit_original_response(embed=embed_attente)
+            except discord.HTTPException:
+                pass
+
+    # Détermination du groupe sanguin à la fin du décompte
+    groupes_sanguins = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+    groupe_trouve = random.choice(groupes_sanguins)
+
+    embed_resultat = discord.Embed(
+        title="🩸 Résultat de l'Analyse Sanguine",
+        color=discord.Color.red()
+    )
+    embed_resultat.add_field(name="Patient", value=patient_full, inline=True)
+    embed_resultat.add_field(name="Groupe sanguin", value=f"**{groupe_trouve}**", inline=True)
+    embed_resultat.set_footer(text=f"Laboratoire EMS • Analyse validée par {interaction.user.display_name}")
+
+    await interaction.edit_original_response(embed=embed_resultat)
 
 # ---------- TRIAGE ----------
 TRIAGE_DATA = {
