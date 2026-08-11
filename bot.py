@@ -1,5 +1,7 @@
 import os
 import io
+import random
+import asyncio
 import logging
 import traceback
 from datetime import datetime, timezone
@@ -7,8 +9,6 @@ from typing import Optional, List
 
 import aiosqlite
 import discord
-import random
-import asyncio
 from discord import app_commands
 from discord.ext import commands
 from fpdf import FPDF
@@ -121,6 +121,15 @@ async def save_dossier_intervention(patient_name: str, blessure: str, soins: str
         return cursor.lastrowid
 
 
+async def update_facture_statut(record_id: int, statut: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE dossiers_intervention SET statut_facture = ? WHERE id = ?",
+            (statut, record_id)
+        )
+        await db.commit()
+
+
 async def get_interventions_for_patient(patient_name: str, limit: int = 5) -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -208,7 +217,7 @@ class SafeView(discord.ui.View):
 
 class ExportPDFView(SafeView):
     def __init__(self, title: str, fields: List[tuple], filename: str, footer: str = ""):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         self.title = title
         self.fields = fields
         self.filename = filename
@@ -222,14 +231,58 @@ class ExportPDFView(SafeView):
         )
 
 
+class PublishedFactureView(SafeView):
+    def __init__(self, title: str, fields: List[tuple], filename: str, footer: str = "", record_id: Optional[int] = None):
+        super().__init__(timeout=None)
+        self.title = title
+        self.fields = fields
+        self.filename = filename
+        self.footer = footer
+        self.record_id = record_id
+
+    @discord.ui.button(label="📄 Exporter en PDF", style=discord.ButtonStyle.secondary)
+    async def export(self, interaction: discord.Interaction, button: discord.ui.Button):
+        buf = generate_pdf(self.title, self.fields, self.footer)
+        await interaction.response.send_message(
+            file=discord.File(buf, filename=self.filename), ephemeral=True
+        )
+
+    @discord.ui.button(label="💳 Valider le paiement", style=discord.ButtonStyle.success)
+    async def pay(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.record_id:
+            await update_facture_statut(self.record_id, "Payée")
+
+        embed = interaction.message.embeds[0]
+        
+        # Mise à jour ou ajout du champ statut de paiement dans l'embed
+        updated = False
+        for i, field in enumerate(embed.fields):
+            if "Statut" in field.name:
+                embed.set_field_at(i, name="Statut du paiement", value=f"✅ **Payée** (validé par {interaction.user.display_name})", inline=False)
+                updated = True
+                break
+        if not updated:
+            embed.add_field(name="Statut du paiement", value=f"✅ **Payée** (validé par {interaction.user.display_name})", inline=False)
+
+        embed.color = discord.Color.blue()
+
+        button.disabled = True
+        button.label = "Facture Payée ✅"
+        button.style = discord.ButtonStyle.secondary
+
+        await interaction.response.edit_message(embed=embed, view=self)
+
+
 class RapportReviewView(SafeView):
-    def __init__(self, embed: discord.Embed, pdf_title: str, pdf_fields: List[tuple], pdf_filename: str, pdf_footer: str):
+    def __init__(self, embed: discord.Embed, pdf_title: str, pdf_fields: List[tuple], pdf_filename: str, pdf_footer: str, record_id: Optional[int] = None, is_facture: bool = False):
         super().__init__(timeout=300)
         self.embed = embed
         self.pdf_title = pdf_title
         self.pdf_fields = pdf_fields
         self.pdf_filename = pdf_filename
         self.pdf_footer = pdf_footer
+        self.record_id = record_id
+        self.is_facture = is_facture
 
     @discord.ui.button(label="📄 Exporter en PDF", style=discord.ButtonStyle.secondary)
     async def export(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -240,12 +293,22 @@ class RapportReviewView(SafeView):
 
     @discord.ui.button(label="✅ Publier définitivement", style=discord.ButtonStyle.success)
     async def publish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        final_view = ExportPDFView(
-            title=self.pdf_title,
-            fields=self.pdf_fields,
-            filename=self.pdf_filename,
-            footer=self.pdf_footer
-        )
+        if self.is_facture:
+            final_view = PublishedFactureView(
+                title=self.pdf_title,
+                fields=self.pdf_fields,
+                filename=self.pdf_filename,
+                footer=self.pdf_footer,
+                record_id=self.record_id
+            )
+        else:
+            final_view = ExportPDFView(
+                title=self.pdf_title,
+                fields=self.pdf_fields,
+                filename=self.pdf_filename,
+                footer=self.pdf_footer
+            )
+        
         await interaction.channel.send(embed=self.embed, view=final_view)
         
         button.disabled = True
@@ -769,7 +832,7 @@ class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Hora
         await interaction.response.send_modal(RapportInterventionModal2(data, patient_name=self.patient_name))
 
 
-# ---------- FACTURATION AVEC QUANTITÉ ----------
+# ---------- FACTURATION AVEC QUANTITÉ ET BROUILLON ----------
 FACTURATION_CATEGORIES = {
     "soins_base": {
         "label": "💉 Soins de base",
@@ -1010,23 +1073,28 @@ class FacturationSummaryView(SafeView):
             created_by_name=interaction.user.display_name,
         )
 
-        embed = discord.Embed(title="🧾 Facturation finale", color=discord.Color.green())
+        embed = discord.Embed(title="🧾 Facturation EMS", color=discord.Color.green())
         embed.add_field(name="Patient", value=self.session.patient_name, inline=False)
         embed.add_field(name="Soins effectués", value=detail_text, inline=False)
         embed.add_field(name="Total", value=f"**{self.session.total} $**", inline=False)
+        embed.add_field(name="Statut du paiement", value="⏳ **En attente de règlement**", inline=False)
         embed.set_footer(text=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}")
 
-        pdf_view = ExportPDFView(
-            title="Facturation EMS",
-            fields=[
+        review_view = RapportReviewView(
+            embed=embed,
+            pdf_title="Facturation EMS",
+            pdf_fields=[
                 ("Patient", self.session.patient_name),
                 ("Soins effectués", detail_text), 
-                ("Total", f"{self.session.total} $")
+                ("Total", f"{self.session.total} $"),
+                ("Statut", "En attente")
             ],
-            filename=f"facturation_{record_id}.pdf",
-            footer=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}",
+            pdf_filename=f"facturation_{record_id}.pdf",
+            pdf_footer=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}",
+            record_id=record_id,
+            is_facture=True
         )
-        await interaction.response.edit_message(embed=embed, view=pdf_view)
+        await interaction.response.edit_message(embed=embed, view=review_view)
 
 
 @bot.tree.command(name="facturation", description="Noter les soins effectués et calculer le prix total")
@@ -1038,10 +1106,53 @@ async def facturation(interaction: discord.Interaction, patient: str):
     if dossier:
         session.patient_name = dossier['nom']
     embed = build_facturation_embed(session, note="Choisis une catégorie de soins pour commencer.")
-    await interaction.response.send_message(embed=embed, view=FacturationCategoryView(session))
+    await interaction.response.send_message(embed=embed, view=FacturationCategoryView(session), ephemeral=True)
 
 
 # ---------- COMMANDES SLASH ----------
+@bot.tree.command(name="analyse_groupe_sanguin", description="Lancer une analyse de groupe sanguin en laboratoire (30s à 2min)")
+@app_commands.describe(nom="Nom de famille du patient", prenom="Prénom du patient")
+async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, prenom: str):
+    patient_full = f"{prenom.capitalize()} {nom.capitalize()}"
+    duree_totale = random.randint(30, 120)
+    
+    embed_attente = discord.Embed(
+        title="🧪 Analyse sanguine en laboratoire",
+        description=f"Prélèvement en cours de traitement pour **{patient_full}**.\n\n⏳ **Statut :** Analyse des antigènes en cours...",
+        color=discord.Color.gold()
+    )
+    embed_attente.add_field(name="Temps estimé", value=f"~{duree_totale} secondes", inline=False)
+    embed_attente.set_footer(text=f"Lancé par {interaction.user.display_name}")
+
+    await interaction.response.send_message(embed=embed_attente)
+
+    temps_restant = duree_totale
+    while temps_restant > 0:
+        sleep_step = min(10, temps_restant)
+        await asyncio.sleep(sleep_step)
+        temps_restant -= sleep_step
+        
+        if temps_restant > 0:
+            embed_attente.description = f"Prélèvement en cours de traitement pour **{patient_full}**.\n\n⏳ **Statut :** Centrifugation & réactifs en cours ({temps_restant}s restantes)..."
+            try:
+                await interaction.edit_original_response(embed=embed_attente)
+            except discord.HTTPException:
+                pass
+
+    groupes_sanguins = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+    groupe_trouve = random.choice(groupes_sanguins)
+
+    embed_resultat = discord.Embed(
+        title="🩸 Résultat de l'Analyse Sanguine",
+        color=discord.Color.red()
+    )
+    embed_resultat.add_field(name="Patient", value=patient_full, inline=True)
+    embed_resultat.add_field(name="Groupe sanguin", value=f"**{groupe_trouve}**", inline=True)
+    embed_resultat.set_footer(text=f"Laboratoire EMS • Analyse validée par {interaction.user.display_name}")
+
+    await interaction.edit_original_response(embed=embed_resultat)
+
+
 @bot.tree.command(name="nouveau_dossier", description="Créer un dossier médical complet (visite standard)")
 async def dossier_medical_creer(interaction: discord.Interaction):
     await interaction.response.send_modal(DossierMedicalModal())
@@ -1151,49 +1262,6 @@ async def dossier_supprimer_nom_autocomplete(interaction: discord.Interaction, c
     resultats = await search_dossiers_personnel(current, 25)
     return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
 
-@bot.tree.command(name="analyse_groupe_sanguin", description="Lancer une analyse de groupe sanguin en laboratoire (30s à 2min)")
-@app_commands.describe(nom="Nom de famille du patient", prenom="Prénom du patient")
-async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, prenom: str):
-    patient_full = f"{prenom.capitalize()} {nom.capitalize()}"
-    duree_totale = random.randint(30, 120)  # Décompte aléatoire entre 30s et 120s
-    
-    embed_attente = discord.Embed(
-        title="🧪 Analyse sanguine en laboratoire",
-        description=f"Prélèvement en cours de traitement pour **{patient_full}**.\n\n⏳ **Statut :** Analyse des antigènes en cours...",
-        color=discord.Color.gold()
-    )
-    embed_attente.add_field(name="Temps estimé", value=f"~{duree_totale} secondes", inline=False)
-    embed_attente.set_footer(text=f"Lancé par {interaction.user.display_name}")
-
-    await interaction.response.send_message(embed=embed_attente)
-
-    # Décompte progressif mis à jour toutes les 10s pour respecter les limites Discord
-    temps_restant = duree_totale
-    while temps_restant > 0:
-        sleep_step = min(10, temps_restant)
-        await asyncio.sleep(sleep_step)
-        temps_restant -= sleep_step
-        
-        if temps_restant > 0:
-            embed_attente.description = f"Prélèvement en cours de traitement pour **{patient_full}**.\n\n⏳ **Statut :** Centrifugation & réactifs en cours ({temps_restant}s restantes)..."
-            try:
-                await interaction.edit_original_response(embed=embed_attente)
-            except discord.HTTPException:
-                pass
-
-    # Détermination du groupe sanguin à la fin du décompte
-    groupes_sanguins = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
-    groupe_trouve = random.choice(groupes_sanguins)
-
-    embed_resultat = discord.Embed(
-        title="🩸 Résultat de l'Analyse Sanguine",
-        color=discord.Color.red()
-    )
-    embed_resultat.add_field(name="Patient", value=patient_full, inline=True)
-    embed_resultat.add_field(name="Groupe sanguin", value=f"**{groupe_trouve}**", inline=True)
-    embed_resultat.set_footer(text=f"Laboratoire EMS • Analyse validée par {interaction.user.display_name}")
-
-    await interaction.edit_original_response(embed=embed_resultat)
 
 # ---------- TRIAGE ----------
 TRIAGE_DATA = {
@@ -1360,7 +1428,6 @@ class RandomCaseButton(discord.ui.Button):
         self.zone_key = zone_key
 
     async def callback(self, interaction: discord.Interaction):
-        import random
         case = random.choice(TRIAGE_DATA[self.zone_key]["cases"])
         embed = build_case_embed(self.zone_key, case)
         await interaction.response.edit_message(embed=embed, view=CaseView(self.zone_key))
@@ -1442,6 +1509,3 @@ async def on_ready():
 
 if __name__ == "__main__":
     bot.run(TOKEN)
-
-
-
