@@ -199,25 +199,35 @@ async def list_all_personnel(limit: int = 50) -> List[dict]:
 # ---------- EXPORT PDF ----------
 def generate_pdf(title: str, fields: List[tuple], footer: str = "") -> io.BytesIO:
     pdf = FPDF()
+    # Active le saut de page automatique pour éviter l'erreur 'Not enough height'
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
+    
     pdf.set_font("Helvetica", "B", 16)
     pdf.multi_cell(0, 10, title)
     pdf.ln(4)
-    pdf.set_font("Helvetica", "", 12)
+    
     for label, value in fields:
         pdf.set_font("Helvetica", "B", 12)
         pdf.multi_cell(0, 7, f"{label} :")
         pdf.set_font("Helvetica", "", 12)
-        pdf.multi_cell(0, 7, str(value) or "Non renseigné")
+        
+        val_str = str(value).strip() if value else "Non renseigné"
+        pdf.multi_cell(0, 7, val_str)
         pdf.ln(2)
+        
     if footer:
         pdf.set_font("Helvetica", "I", 9)
         pdf.ln(4)
         pdf.multi_cell(0, 5, footer)
+        
     raw_output = pdf.output()
     if isinstance(raw_output, str):
         raw_output = raw_output.encode("latin-1", errors="replace")
-    buf = io.BytesIO(bytes(raw_output))
+    else:
+        raw_output = bytes(raw_output)
+
+    buf = io.BytesIO(raw_output)
     buf.seek(0)
     return buf
 
@@ -286,6 +296,7 @@ class FacturationFinalView(SafeView):
         button.style = discord.ButtonStyle.secondary
 
         await interaction.response.edit_message(embed=embed, view=self)
+
 
 # ---------- FORMULAIRE : DOSSIER MÉDICAL ----------
 async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dict):
