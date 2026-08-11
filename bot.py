@@ -220,10 +220,19 @@ class ExportPDFView(SafeView):
         )
 
 
-# ---------- FORMULAIRE : DOSSIER MÉDICAL ----------
-# Discord limite un Modal à 5 champs maximum : ce formulaire (20 champs) est donc
-# découpé en 4 modals qui s'enchaînent (chacun ouvre le suivant à la soumission).
+# ---------- VUES DE TRANSITION AVEC BOUTON ----------
+class NextStepView(SafeView):
+    def __init__(self, modal_to_open: discord.ui.Modal, label: str = "Continuer vers la suite"):
+        super().__init__(timeout=180)
+        self.modal_to_open = modal_to_open
+        self.children[0].label = label
 
+    @discord.ui.button(style=discord.ButtonStyle.primary)
+    async def next_step(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(self.modal_to_open)
+
+
+# ---------- FORMULAIRE : DOSSIER MÉDICAL ----------
 async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dict):
     embed = discord.Embed(title="**__🩺 Dossier Médical – Visite Standard__**", color=discord.Color.blue())
 
@@ -352,7 +361,12 @@ class DossierMedicalModal3(discord.ui.Modal, title="Dossier Médical (3/4) - Exa
             "respiration": self.respiration.value,
             "vision": self.vision.value,
         })
-        await interaction.response.send_modal(DossierMedicalModal4(self.data))
+        next_modal = DossierMedicalModal4(self.data)
+        await interaction.response.send_message(
+            "Étape 3/4 enregistrée. Cliquez sur le bouton ci-dessous pour remplir la suite :",
+            view=NextStepView(next_modal, "Continuer vers l'Étape 4/4"),
+            ephemeral=True
+        )
 
 
 class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Antécédents"):
@@ -384,7 +398,12 @@ class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Ant
             "antecedents_chirurgicaux": self.antecedents_chirurgicaux.value,
             "taille": self.taille.value,
         })
-        await interaction.response.send_modal(DossierMedicalModal3(self.data))
+        next_modal = DossierMedicalModal3(self.data)
+        await interaction.response.send_message(
+            "Étape 2/4 enregistrée. Cliquez sur le bouton ci-dessous pour remplir la suite :",
+            view=NextStepView(next_modal, "Continuer vers l'Étape 3/4"),
+            ephemeral=True
+        )
 
 
 class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Identité"):
@@ -402,13 +421,15 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
             "date_visite": self.date_visite.value,
             "medecin_ems": self.medecin_ems.value,
         }
-        await interaction.response.send_modal(DossierMedicalModal2(data))
+        next_modal = DossierMedicalModal2(data)
+        await interaction.response.send_message(
+            "Étape 1/4 enregistrée. Cliquez sur le bouton ci-dessous pour remplir la suite :",
+            view=NextStepView(next_modal, "Continuer vers l'Étape 2/4"),
+            ephemeral=True
+        )
 
 
 # ---------- FORMULAIRE : MODIFICATION ----------
-# 21 champs -> 5 modals chaînés (max 5 champs par modal côté Discord).
-# Seuls les champs remplis sont conservés comme "modifications".
-
 _MODIF_LABELS = {
     "nouveau_nom": "Nom & prénom",
     "nouveau_age": "Âge",
@@ -490,7 +511,12 @@ class DossierModifierModal4(discord.ui.Modal, title="Modification (4/5) - Conclu
             "nouvelle_aptitude": self.nouvelle_aptitude.value,
             "nouvelles_recommandations": self.nouvelles_recommandations.value,
         })
-        await interaction.response.send_modal(DossierModifierModal5(self.ancien_nom, self.data))
+        next_modal = DossierModifierModal5(self.ancien_nom, self.data)
+        await interaction.response.send_message(
+            "Étape 4/5 enregistrée. Cliquez sur le bouton ci-dessous pour remplir la suite :",
+            view=NextStepView(next_modal, "Continuer vers l'Étape 5/5"),
+            ephemeral=True
+        )
 
 
 class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen clinique"):
@@ -513,7 +539,12 @@ class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen
             "nouveau_pouls": self.nouveau_pouls.value,
             "nouvelle_respiration": self.nouvelle_respiration.value,
         })
-        await interaction.response.send_modal(DossierModifierModal4(self.ancien_nom, self.data))
+        next_modal = DossierModifierModal4(self.ancien_nom, self.data)
+        await interaction.response.send_message(
+            "Étape 3/5 enregistrée. Cliquez sur le bouton ci-dessous pour remplir la suite :",
+            view=NextStepView(next_modal, "Continuer vers l'Étape 4/5"),
+            ephemeral=True
+        )
 
 
 class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antécédents"):
@@ -536,7 +567,12 @@ class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antéc
             "nouveaux_traitements": self.nouveaux_traitements.value,
             "nouveaux_antecedents": self.nouveaux_antecedents.value,
         })
-        await interaction.response.send_modal(DossierModifierModal3(self.ancien_nom, self.data))
+        next_modal = DossierModifierModal3(self.ancien_nom, self.data)
+        await interaction.response.send_message(
+            "Étape 2/5 enregistrée. Cliquez sur le bouton ci-dessous pour remplir la suite :",
+            view=NextStepView(next_modal, "Continuer vers l'Étape 3/5"),
+            ephemeral=True
+        )
 
 
 class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/5) - Identité"):
@@ -553,12 +589,15 @@ class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/5) - 
             "nouveau_sexe": self.nouveau_sexe.value,
             "nouvelle_date": self.nouvelle_date.value,
         }
-        await interaction.response.send_modal(DossierModifierModal2(self.ancien_nom.value, data))
+        next_modal = DossierModifierModal2(self.ancien_nom.value, data)
+        await interaction.response.send_message(
+            "Étape 1/5 enregistrée. Cliquez sur le bouton ci-dessous pour remplir la suite :",
+            view=NextStepView(next_modal, "Continuer vers l'Étape 2/5"),
+            ephemeral=True
+        )
 
 
 # ---------- FORMULAIRE : RAPPORT INTERVENTION EMS ----------
-# 17 champs -> 4 modals chaînés (max 5 champs par modal côté Discord).
-
 async def _finaliser_rapport_intervention(interaction: discord.Interaction, data: dict):
     embed = discord.Embed(title="**__Rapport d'Intervention EMS__**", color=discord.Color.red())
 
@@ -690,7 +729,12 @@ class RapportInterventionModal3(discord.ui.Modal, title="Rapport EMS (3/4) - Pro
             "destination": self.destination.value,
             "observations": self.observations.value,
         })
-        await interaction.response.send_modal(RapportInterventionModal4(self.data))
+        next_modal = RapportInterventionModal4(self.data)
+        await interaction.response.send_message(
+            "Étape 3/4 enregistrée. Cliquez sur le bouton ci-dessous pour remplir la suite :",
+            view=NextStepView(next_modal, "Continuer vers l'Étape 4/4"),
+            ephemeral=True
+        )
 
 
 class RapportInterventionModal2(discord.ui.Modal, title="Rapport EMS (2/4) - Patient"):
@@ -718,7 +762,12 @@ class RapportInterventionModal2(discord.ui.Modal, title="Rapport EMS (2/4) - Pat
             "patient_etat": self.patient_etat.value,
             "signes_vitaux": self.signes_vitaux.value,
         })
-        await interaction.response.send_modal(RapportInterventionModal3(self.data))
+        next_modal = RapportInterventionModal3(self.data)
+        await interaction.response.send_message(
+            "Étape 2/4 enregistrée. Cliquez sur le bouton ci-dessous pour remplir la suite :",
+            view=NextStepView(next_modal, "Continuer vers l'Étape 3/4"),
+            ephemeral=True
+        )
 
 
 class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Horaires"):
@@ -740,7 +789,12 @@ class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Hora
             "heure_fin": self.heure_fin.value,
             "ems_noms": self.ems_noms.value,
         }
-        await interaction.response.send_modal(RapportInterventionModal2(data, patient_name=self.patient_name))
+        next_modal = RapportInterventionModal2(data, patient_name=self.patient_name)
+        await interaction.response.send_message(
+            "Étape 1/4 enregistrée. Cliquez sur le bouton ci-dessous pour remplir la suite :",
+            view=NextStepView(next_modal, "Continuer vers l'Étape 2/4"),
+            ephemeral=True
+        )
 
 
 # ---------- FACTURATION AVEC QUANTITÉ ----------
@@ -1374,3 +1428,6 @@ async def on_ready():
 
 if __name__ == "__main__":
     bot.run(TOKEN)
+
+
+
