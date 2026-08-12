@@ -36,7 +36,6 @@ async def get_db_connection() -> Connection:
     return await asyncpg.connect(DATABASE_URL)
 
 async def init_db():
-    async def init_db():
     """Crée les tables si elles n'existent pas, avec gestion des erreurs de connexion."""
     retries = 5
     delay = 3  # secondes d'attente entre chaque tentative
@@ -79,6 +78,13 @@ async def init_db():
                 return # On sort de la fonction si tout est bon
             finally:
                 await conn.close()
+                
+        except Exception as e:
+            print(f"⚠️ Tentative {attempt}/{retries} de connexion à la DB échouée : {e}")
+            if attempt == retries:
+                print("❌ Échec définitif de la connexion à la DB. Arrêt du bot.")
+                raise e # Si ça échoue 5 fois, le bot plante volontairement pour que Railway le redémarre
+            await asyncio.sleep(delay) # Attend 3 secondes avant la prochaine tentative
                 
         except Exception as e:
             print(f"⚠️ Tentative {attempt}/{retries} de connexion à la DB échouée : {e}")
