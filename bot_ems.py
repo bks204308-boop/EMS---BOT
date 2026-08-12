@@ -91,8 +91,16 @@ async def init_db():
                 raise e
             await asyncio.sleep(delay)
 
-# ------- FONCTIONS D'ACCÈS (Refaites avec le Pool) -------
+# ---------------------------------------------------------
+# AJOUT DE SÉCURITÉ : Vérifie que le pool est créé avant usage
+# ---------------------------------------------------------
+async def ensure_db_pool():
+    """Vérifie si le pool existe, et le crée immédiatement si ce n'est pas le cas."""
+    global db_pool
+    if db_pool is None:
+        await create_db_pool()
 
+# ------- FONCTIONS D'ACCÈS (Refaites avec le Pool) -------
 async def save_dossier_personnel(
     prenom: str,
     nom: str,
@@ -102,6 +110,7 @@ async def save_dossier_personnel(
     contact_urgence: str,
     created_by: int,
 ):
+    await ensure_db_pool() # SÉCURITÉ
     async with db_pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO dossiers_personnel (prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
@@ -116,6 +125,7 @@ async def save_dossier_personnel(
            datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat())
 
 async def get_dossier_personnel(prenom: str, nom: str) -> Optional[dict]:
+    await ensure_db_pool() # SÉCURITÉ
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM dossiers_personnel WHERE prenom = $1 AND nom = $2",
@@ -124,6 +134,7 @@ async def get_dossier_personnel(prenom: str, nom: str) -> Optional[dict]:
         return dict(row) if row else None
 
 async def search_dossiers_personnel(query: str, limit: int = 25) -> List[dict]:
+    await ensure_db_pool() # SÉCURITÉ
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM dossiers_personnel WHERE prenom ILIKE $1 OR nom ILIKE $1 ORDER BY nom, prenom LIMIT $2",
@@ -143,6 +154,7 @@ async def get_dossier_complet(identifiant: str) -> Optional[dict]:
     return resultats[0] if resultats else None
 
 async def list_all_personnel(limit: int = 50) -> List[dict]:
+    await ensure_db_pool() # SÉCURITÉ
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM dossiers_personnel ORDER BY nom, prenom LIMIT $1", limit
@@ -150,6 +162,7 @@ async def list_all_personnel(limit: int = 50) -> List[dict]:
         return [dict(row) for row in rows]
 
 async def delete_dossier_personnel(prenom: str, nom: str) -> bool:
+    await ensure_db_pool() # SÉCURITÉ
     async with db_pool.acquire() as conn:
         result = await conn.execute(
             "DELETE FROM dossiers_personnel WHERE prenom = $1 AND nom = $2",
@@ -169,6 +182,7 @@ async def save_dossier_intervention(
     created_by: int,
     created_by_name: str,
 ) -> int:
+    await ensure_db_pool() # SÉCURITÉ
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("""
             INSERT INTO dossiers_intervention (patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture, created_by, created_by_name, created_at)
@@ -179,6 +193,7 @@ async def save_dossier_intervention(
         return row["id"]
 
 async def get_interventions_for_patient(prenom: str, nom: str, limit: int = 5) -> List[dict]:
+    await ensure_db_pool() # SÉCURITÉ
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM dossiers_intervention WHERE patient_prenom = $1 AND patient_nom = $2 ORDER BY id DESC LIMIT $3",
@@ -187,6 +202,7 @@ async def get_interventions_for_patient(prenom: str, nom: str, limit: int = 5) -
         return [dict(row) for row in rows]
 
 async def list_recent_interventions(limit: int = 10) -> List[dict]:
+    await ensure_db_pool() # SÉCURITÉ
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT $1", limit
@@ -194,11 +210,13 @@ async def list_recent_interventions(limit: int = 10) -> List[dict]:
         return [dict(row) for row in rows]
 
 async def delete_intervention(record_id: int) -> bool:
+    await ensure_db_pool() # SÉCURITÉ
     async with db_pool.acquire() as conn:
         result = await conn.execute("DELETE FROM dossiers_intervention WHERE id = $1", record_id)
         return result != "DELETE 0"
 
 async def update_statut_facture(record_id: int, statut: str):
+    await ensure_db_pool() # SÉCURITÉ
     async with db_pool.acquire() as conn:
         await conn.execute(
             "UPDATE dossiers_intervention SET statut_facture = $1 WHERE id = $2",
