@@ -1272,7 +1272,8 @@ async def dossier_supprimer_nom_autocomplete(interaction: discord.Interaction, c
     resultats = await search_dossiers_personnel(current, 25)
     return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
 
-# ANALYSE GROUPE SANGUIN
+# ---------- ANALYSE GROUPE SANGUIN ----------
+
 GROUPE_SANGUIN_RESULTATS = [
     {"groupe": "A+", "rh": "Positif", "frequence": "35%", "description": "Groupe sanguin le plus répandu en Europe"},
     {"groupe": "A-", "rh": "Négatif", "frequence": "6%", "description": "Groupe sanguin rare, donneur universel de globules rouges"},
@@ -1284,40 +1285,168 @@ GROUPE_SANGUIN_RESULTATS = [
     {"groupe": "O-", "rh": "Négatif", "frequence": "6%", "description": "Donneur universel, compatible avec tous les groupes"}
 ]
 
-@bot.tree.command(name="analyse_groupe_sanguin", description="Effectuer une analyse de groupe sanguin")
-@app_commands.describe(nom="Nom du patient", prenom="Prénom du patient")
-async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, prenom: str):
+# Dictionnaire de compatibilité détaillée
+COMPATIBILITE_GROUPE = {
+    "A+": {
+        "donneur_pour": ["A+", "AB+"],
+        "receveur_de": ["A+", "A-", "O+", "O-"]
+    },
+    "A-": {
+        "donneur_pour": ["A+", "A-", "AB+", "AB-"],
+        "receveur_de": ["A-", "O-"]
+    },
+    "B+": {
+        "donneur_pour": ["B+", "AB+"],
+        "receveur_de": ["B+", "B-", "O+", "O-"]
+    },
+    "B-": {
+        "donneur_pour": ["B+", "B-", "AB+", "AB-"],
+        "receveur_de": ["B-", "O-"]
+    },
+    "AB+": {
+        "donneur_pour": ["AB+"],
+        "receveur_de": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+    },
+    "AB-": {
+        "donneur_pour": ["AB+", "AB-"],
+        "receveur_de": ["A-", "B-", "AB-", "O-"]
+    },
+    "O+": {
+        "donneur_pour": ["A+", "B+", "AB+", "O+"],
+        "receveur_de": ["O+", "O-"]
+    },
+    "O-": {
+        "donneur_pour": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+        "receveur_de": ["O-"]
+    }
+}
+
+@bot.tree.command(
+    name="analyse_groupe_sanguin",
+    description="Effectuer une analyse de groupe sanguin avec résultats aléatoires"
+)
+@app_commands.describe(
+    nom="Nom du patient",
+    prenom="Prénom du patient"
+)
+async def analyse_groupe_sanguin(
+    interaction: discord.Interaction,
+    nom: str,
+    prenom: str
+):
+    """Effectue une analyse de groupe sanguin avec effet de chargement"""
+    
     nom_complet = f"{prenom} {nom}"
+    
+    # Vérifier si le patient existe
     dossier = await get_dossier_personnel(nom_complet)
-    embed_chargement = discord.Embed(title="🧪 Analyse du Groupe Sanguin", description=f"**Patient :** {nom_complet}", color=discord.Color.blue())
-    embed_chargement.add_field(name="🔬 Analyse en cours...", value="```\n🩸 Prélèvement sanguin en cours...\n```", inline=False)
+    
+    # Créer l'embed de chargement
+    embed_chargement = discord.Embed(
+        title="🧪 Analyse du Groupe Sanguin",
+        description=f"**Patient :** {nom_complet}",
+        color=discord.Color.blue()
+    )
+    embed_chargement.add_field(
+        name="🔬 Analyse en cours...",
+        value="```\n🩸 Prélèvement sanguin en cours...\n```",
+        inline=False
+    )
     embed_chargement.set_footer(text="⏳ Veuillez patienter...")
+    
     await interaction.response.send_message(embed=embed_chargement, ephemeral=True)
-    etapes = ["🩸 Prélèvement sanguin effectué", "🔬 Préparation de l'échantillon", "🧪 Ajout des réactifs anti-A", "🧪 Ajout des réactifs anti-B", "🧪 Ajout des réactifs anti-D (Rhésus)", "📊 Lecture des résultats", "✅ Analyse terminée"]
+    
+    # Étapes de l'analyse avec délais
+    etapes = [
+        "🩸 Prélèvement sanguin effectué",
+        "🔬 Préparation de l'échantillon",
+        "🧪 Ajout des réactifs anti-A",
+        "🧪 Ajout des réactifs anti-B",
+        "🧪 Ajout des réactifs anti-D (Rhésus)",
+        "📊 Lecture des résultats",
+        "✅ Analyse terminée"
+    ]
+    
     for i, etape in enumerate(etapes):
         await asyncio.sleep(1.2)
+        
         progression = int((i + 1) / len(etapes) * 100)
         barre = "█" * (i + 1) + "░" * (len(etapes) - i - 1)
-        embed_chargement = discord.Embed(title="🧪 Analyse du Groupe Sanguin", description=f"**Patient :** {nom_complet}", color=discord.Color.blue())
-        embed_chargement.add_field(name="🔬 Progression", value=f"```\n{barre} {progression}%\n```\n**{etape}**", inline=False)
+        
+        embed_chargement = discord.Embed(
+            title="🧪 Analyse du Groupe Sanguin",
+            description=f"**Patient :** {nom_complet}",
+            color=discord.Color.blue()
+        )
+        embed_chargement.add_field(
+            name="🔬 Progression de l'analyse",
+            value=f"```\n{barre} {progression}%\n```\n**{etape}**",
+            inline=False
+        )
         embed_chargement.set_footer(text="⏳ Analyse en cours...")
+        
         await interaction.edit_original_response(embed=embed_chargement)
+    
+    # Sélectionner un résultat aléatoire
     resultat = random.choice(GROUPE_SANGUIN_RESULTATS)
-    if resultat["groupe"] == "O-":
-        compatibilite = "🌟 **Donneur universel** - Compatible avec tous les groupes"
-    elif resultat["groupe"] == "AB+":
-        compatibilite = "🌟 **Receveur universel** - Peut recevoir tous les groupes"
-    elif resultat["groupe"] == "O+":
-        compatibilite = "✅ Donneur compatible avec tous les groupes Rh+"
-    else:
-        compatibilite = "✅ Donneur compatible avec son propre groupe"
-    embed_resultat = discord.Embed(title="🧪 Résultat de l'Analyse Sanguine", description=f"**Patient :** {nom_complet}", color=discord.Color.green())
-    embed_resultat.add_field(name="🩸 Groupe Sanguin", value=f"```\n     {resultat['groupe']}\n```\n**Rhésus :** {resultat['rh']}", inline=True)
-    embed_resultat.add_field(name="📊 Fréquence", value=f"{resultat['frequence']}\n\n*{resultat['description']}*", inline=True)
-    embed_resultat.add_field(name="💉 Compatibilité", value=compatibilite, inline=False)
+    groupe = resultat["groupe"]
+    
+    # Récupérer les compatibilités
+    compat = COMPATIBILITE_GROUPE.get(groupe, {})
+    donneur_pour = ", ".join(compat.get("donneur_pour", []))
+    receveur_de = ", ".join(compat.get("receveur_de", []))
+    
+    # Message définitif
+    msg_definitif = (
+        "🔒 **Résultat définitif**\n"
+        "Ce groupe sanguin est officiellement enregistré dans le dossier du patient.\n"
+        "Aucune modification ultérieure ne sera possible sans nouvelle analyse."
+    )
+    
+    # Créer l'embed des résultats
+    embed_resultat = discord.Embed(
+        title="🧪 Résultat de l'Analyse Sanguine",
+        description=f"**Patient :** {nom_complet}",
+        color=discord.Color.green()
+    )
+    
+    embed_resultat.add_field(
+        name="🩸 Groupe Sanguin",
+        value=f"```\n     {resultat['groupe']}\n```\n**Rhésus :** {resultat['rh']}",
+        inline=True
+    )
+    
+    embed_resultat.add_field(
+        name="📊 Fréquence",
+        value=f"{resultat['frequence']}\n\n*{resultat['description']}*",
+        inline=True
+    )
+    
+    embed_resultat.add_field(
+        name="💉 Compatibilités",
+        value=(
+            f"**🩸 Peut donner à :** {donneur_pour}\n"
+            f"**🩸 Peut recevoir de :** {receveur_de}"
+        ),
+        inline=False
+    )
+    
+    embed_resultat.add_field(
+        name="🔒 Résultat définitif",
+        value=msg_definitif,
+        inline=False
+    )
+    
+    # Ajouter les informations du dossier si existant
     if dossier:
-        embed_resultat.add_field(name="📋 Dossier patient", value=f"Âge: {dossier['age'] or 'N/A'}\nAllergies: {dossier['allergies'] or 'Aucune'}", inline=False)
+        embed_resultat.add_field(
+            name="📋 Dossier patient",
+            value=f"Âge: {dossier['age'] or 'N/A'}\nAllergies: {dossier['allergies'] or 'Aucune'}",
+            inline=False
+        )
         embed_resultat.set_footer(text=f"Résultat enregistré dans le dossier de {nom_complet}")
+        
+        # Mettre à jour le groupe sanguin dans le dossier
         await save_dossier_personnel(
             nom=nom_complet,
             age=dossier["age"] or "",
@@ -1328,6 +1457,7 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, pre
         )
     else:
         embed_resultat.set_footer(text="💡 Utilisez /patient_creer pour créer un dossier")
+    
     await interaction.edit_original_response(embed=embed_resultat)
 
 # ---------- TRIAGE ----------
