@@ -601,6 +601,7 @@ class DossierMedicalModal3(discord.ui.Modal, title="Dossier Médical (3/4) - Exa
     pouls = discord.ui.TextInput(label="Pouls", placeholder="Normal / Rapide / Lent", required=False)
     respiration = discord.ui.TextInput(label="Respiration", placeholder="Normale / Difficile", required=False)
     vision = discord.ui.TextInput(label="Vision", placeholder="Normale / Corrigée / Trouble", required=False)
+    medecin_ems = discord.ui.TextInput(label="Médecin / EMS", placeholder="Nom du médecin ou service", required=False) # DÉPLACÉ ICI
 
     def __init__(self, data: dict):
         super().__init__()
@@ -612,6 +613,7 @@ class DossierMedicalModal3(discord.ui.Modal, title="Dossier Médical (3/4) - Exa
             "pouls": self.pouls.value,
             "respiration": self.respiration.value,
             "vision": self.vision.value,
+            "medecin_ems": self.medecin_ems.value,
         })
         next_view = NextStepView(DossierMedicalModal4(self.data), label="Étape 4/4 : Conclusion ➡️")
         await interaction.response.send_message("✅ **Étape 3/4 validée.** Cliquez ci-dessous pour l'étape finale.", view=next_view, ephemeral=True)
@@ -644,7 +646,7 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
     age = discord.ui.TextInput(label="Âge", placeholder="Ex: 45")
     sexe = discord.ui.TextInput(label="Sexe [M / F]", placeholder="M ou F", max_length=1)
     date_visite = discord.ui.TextInput(label="Date de la visite", placeholder="JJ/MM/AAAA")
-    medecin_ems = discord.ui.TextInput(label="Médecin / EMS", placeholder="Nom du médecin ou service")
+    # medecin_ems RETIRÉ D'ICI (6 inputs -> 5 inputs)
 
     async def on_submit(self, interaction: discord.Interaction):
         data = {
@@ -653,12 +655,11 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
             "age": self.age.value,
             "sexe": self.sexe.value,
             "date_visite": self.date_visite.value,
-            "medecin_ems": self.medecin_ems.value,
         }
         next_view = NextStepView(DossierMedicalModal2(data), label="Étape 2/4 : Antécédents ➡️")
         await interaction.response.send_message("✅ **Étape 1/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-# ---------- FORMULAIRE : MODIFICATION ----------
+# ---------- FORMULAIRE : MODIFICATION (Réorganisé pour respecter la limite de 5 inputs) ----------
 _MODIF_LABELS = {
     "nouveau_prenom": "Prénom",
     "nouveau_nom": "Nom",
@@ -702,7 +703,7 @@ async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_pren
     embed.set_footer(text=f"Modifié par {interaction.user.display_name}")
     await interaction.response.send_message(embed=embed)
 
-class DossierModifierModal5(discord.ui.Modal, title="Modification (5/5) - Signature"):
+class DossierModifierModal6(discord.ui.Modal, title="Modification (6/6) - Signature"):
     nouvelle_signature = discord.ui.TextInput(label="Nouvelle Signature", placeholder="Nouvelle signature", required=False)
     def __init__(self, ancien_prenom: str, ancien_nom: str, data: dict):
         super().__init__()
@@ -713,7 +714,7 @@ class DossierModifierModal5(discord.ui.Modal, title="Modification (5/5) - Signat
         self.data["nouvelle_signature"] = self.nouvelle_signature.value
         await _finaliser_modif_dossier(interaction, self.ancien_prenom, self.ancien_nom, self.data)
 
-class DossierModifierModal4(discord.ui.Modal, title="Modification (4/5) - Conclusion"):
+class DossierModifierModal5(discord.ui.Modal, title="Modification (5/6) - Conclusion"):
     nouvelle_vision = discord.ui.TextInput(label="Nouvelle Vision", placeholder="Normale / Corrigée / Trouble", required=False)
     nouvelle_audition = discord.ui.TextInput(label="Nouvelle Audition", placeholder="Normale / Diminuée", required=False)
     nouvelles_observations = discord.ui.TextInput(label="Nouvelles Observations", style=discord.TextStyle.paragraph, required=False)
@@ -732,10 +733,10 @@ class DossierModifierModal4(discord.ui.Modal, title="Modification (4/5) - Conclu
             "nouvelle_aptitude": self.nouvelle_aptitude.value,
             "nouvelles_recommandations": self.nouvelles_recommandations.value,
         })
-        next_view = NextStepView(DossierModifierModal5(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 5/5 : Signature ➡️")
-        await interaction.response.send_message("✅ **Étape 4/5 validée.** Cliquez ci-dessous pour terminer.", view=next_view, ephemeral=True)
+        next_view = NextStepView(DossierModifierModal6(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 6/6 : Signature ➡️")
+        await interaction.response.send_message("✅ **Étape 5/6 validée.** Cliquez ci-dessous pour terminer.", view=next_view, ephemeral=True)
 
-class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen clinique"):
+class DossierModifierModal4(discord.ui.Modal, title="Modification (4/6) - Examen clinique"):
     nouvelle_taille = discord.ui.TextInput(label="Nouvelle Taille", placeholder="cm", required=False)
     nouveau_poids = discord.ui.TextInput(label="Nouveau Poids", placeholder="kg", required=False)
     nouveau_groupe = discord.ui.TextInput(label="Nouveau Groupe sanguin", placeholder="Ex: A+", required=False)
@@ -754,10 +755,10 @@ class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen
             "nouveau_pouls": self.nouveau_pouls.value,
             "nouvelle_respiration": self.nouvelle_respiration.value,
         })
-        next_view = NextStepView(DossierModifierModal4(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 4/5 : Conclusion ➡️")
-        await interaction.response.send_message("✅ **Étape 3/5 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
+        next_view = NextStepView(DossierModifierModal5(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 5/6 : Conclusion ➡️")
+        await interaction.response.send_message("✅ **Étape 4/6 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antécédents"):
+class DossierModifierModal3(discord.ui.Modal, title="Modification (3/6) - Antécédents"):
     nouveau_medecin = discord.ui.TextInput(label="Nouveau Médecin / EMS", placeholder="Nouveau médecin", required=False)
     nouvelles_allergies = discord.ui.TextInput(label="Nouvelles Allergies", placeholder="Nouvelles allergies", style=discord.TextStyle.paragraph, required=False)
     nouvelles_maladies = discord.ui.TextInput(label="Nouvelles Maladies chroniques", placeholder="Nouvelles maladies", style=discord.TextStyle.paragraph, required=False)
@@ -776,31 +777,48 @@ class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antéc
             "nouveaux_traitements": self.nouveaux_traitements.value,
             "nouveaux_antecedents": self.nouveaux_antecedents.value,
         })
-        next_view = NextStepView(DossierModifierModal3(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 3/5 : Examen clinique ➡️")
-        await interaction.response.send_message("✅ **Étape 2/5 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
+        next_view = NextStepView(DossierModifierModal4(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 4/6 : Examen clinique ➡️")
+        await interaction.response.send_message("✅ **Étape 3/6 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/5) - Identité"):
-    ancien_prenom = discord.ui.TextInput(label="Ancien Prénom", placeholder="Prénom actuel", required=True)
-    ancien_nom = discord.ui.TextInput(label="Ancien Nom", placeholder="Nom actuel", required=True)
+class DossierModifierModal2(discord.ui.Modal, title="Modification (2/6) - Nouvelle Identité"):
     nouveau_prenom = discord.ui.TextInput(label="Nouveau Prénom", placeholder="Nouveau prénom", required=False)
     nouveau_nom = discord.ui.TextInput(label="Nouveau Nom", placeholder="Nouveau nom", required=False)
     nouveau_age = discord.ui.TextInput(label="Nouvel Âge", placeholder="Nouvel âge", required=False)
     nouveau_sexe = discord.ui.TextInput(label="Nouveau Sexe [M/F]", placeholder="M ou F", max_length=1, required=False)
     nouvelle_date = discord.ui.TextInput(label="Nouvelle Date de visite", placeholder="JJ/MM/AAAA", required=False)
 
+    def __init__(self, ancien_prenom: str, ancien_nom: str, data: dict):
+        super().__init__()
+        self.ancien_prenom = ancien_prenom
+        self.ancien_nom = ancien_nom
+        self.data = data
+
     async def on_submit(self, interaction: discord.Interaction):
-        data = {
+        self.data.update({
             "nouveau_prenom": self.nouveau_prenom.value,
             "nouveau_nom": self.nouveau_nom.value,
             "nouveau_age": self.nouveau_age.value,
             "nouveau_sexe": self.nouveau_sexe.value,
             "nouvelle_date": self.nouvelle_date.value,
-        }
+        })
+        next_view = NextStepView(
+            DossierModifierModal3(self.ancien_prenom, self.ancien_nom, self.data),
+            label="Étape 3/6 : Antécédents ➡️"
+        )
+        await interaction.response.send_message("✅ **Étape 2/6 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
+
+class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/6) - Identification"):
+    ancien_prenom = discord.ui.TextInput(label="Ancien Prénom", placeholder="Prénom actuel", required=True)
+    ancien_nom = discord.ui.TextInput(label="Ancien Nom", placeholder="Nom actuel", required=True)
+    # Seulement 2 champs ici pour respecter la limite des 5 inputs !
+
+    async def on_submit(self, interaction: discord.Interaction):
+        data = {}
         next_view = NextStepView(
             DossierModifierModal2(self.ancien_prenom.value, self.ancien_nom.value, data),
-            label="Étape 2/5 : Antécédents ➡️"
+            label="Étape 2/6 : Nouvelle Identité ➡️"
         )
-        await interaction.response.send_message("✅ **Étape 1/5 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
+        await interaction.response.send_message("✅ **Étape 1/6 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
 # ---------- RAPPORT INTERVENTION ----------
 async def _finaliser_rapport_intervention(interaction: discord.Interaction, data: dict):
@@ -1544,7 +1562,7 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, 
         inline=False
     )
 
-    # === NOUVEAU : AJOUT DES COMPATIBILITÉS DE DON ET DE RÉCEPTION ===
+    # === AJOUT DES COMPATIBILITÉS DE DON ET DE RÉCEPTION ===
     embed_final.add_field(
         name="🩸 Compatibilités sanguines",
         value=f"**Peut donner à :** {donneur_pour}\n**Peut recevoir de :** {receveur_de}",
@@ -1755,7 +1773,7 @@ async def on_ready():
     for guild in bot.guilds:
         print(f"   - {guild.name} (ID: {guild.id})")
 
-    # ÉTAPE DE NETTOYAGE : Supprimer les anciennes commandes spécifiques aux serveurs pour éviter les doublons
+    # Nettoyage des anciennes commandes spécifiques aux serveurs pour éviter les doublons
     print("🧹 Nettoyage des anciennes commandes spécifiques aux serveurs...")
     for guild in bot.guilds:
         try:
@@ -1772,7 +1790,7 @@ async def on_ready():
     except Exception as e:
         print(f"❌ Erreur sync globale : {e}")
 
-    # Vérifier combien de commandes sont enregistrées
+    # Vérifier le nombre de commandes enregistrées
     try:
         cmds = await bot.tree.fetch_commands()
         print(f"📋 {len(cmds)} commandes disponibles globalement :")
