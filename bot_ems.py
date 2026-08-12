@@ -15,8 +15,13 @@ from discord.ext import commands
 from fpdf import FPDF
 from PIL import Image, ImageDraw
 
+# Nouvelles importations pour PostgreSQL avec Pool
+import asyncpg
+
 TOKEN = os.getenv("DISCORD_TOKEN")
 DB_PATH = os.getenv("BOT_DB_PATH", "bot_data.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 logger = logging.getLogger("rp_medical_bot")
 logging.basicConfig(level=logging.INFO)
 
@@ -24,16 +29,19 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# ---------- BASE DE DONNÉES (PostgreSQL - POOL) ----------
+db_pool = None  # Variable globale pour garder le pool de connexions
 
-# ---------- BASE DE DONNÉES (PostgreSQL) ----------
-import asyncpg
-from asyncpg import Connection
-
-DATABASE_URL = os.getenv("DATABASE_URL")  # Railway fournit cette variable
-
-async def get_db_connection() -> Connection:
-    """Crée une connexion à la base PostgreSQL."""
-    return await asyncpg.connect(DATABASE_URL)
+async def create_db_pool():
+    """Crée un pool de connexions PostgreSQL pour éviter les erreurs DNS."""
+    global db_pool
+    db_pool = await asyncpg.create_pool(
+        DATABASE_URL,
+        min_size=1,
+        max_size=10,
+        command_timeout=5
+    )
+    print("✅ Pool de connexions à la base de données créé.")
 
 async def init_db():
     """Crée les tables si elles n'existent pas, avec gestion des erreurs de connexion."""
@@ -42,8 +50,7 @@ async def init_db():
     
     for attempt in range(1, retries + 1):
         try:
-            conn = await get_db_connection()
-            try:
+            async with db_pool.acquire() as conn:
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS dossiers_personnel (
                         id SERIAL PRIMARY KEY,
@@ -76,24 +83,15 @@ async def init_db():
                 """)
                 print("✅ Connexion à la base de données établie et tables créées.")
                 return # On sort de la fonction si tout est bon
-            finally:
-                await conn.close()
                 
         except Exception as e:
             print(f"⚠️ Tentative {attempt}/{retries} de connexion à la DB échouée : {e}")
             if attempt == retries:
                 print("❌ Échec définitif de la connexion à la DB. Arrêt du bot.")
-                raise e # Si ça échoue 5 fois, le bot plante volontairement pour que Railway le redémarre
-            await asyncio.sleep(delay) # Attend 3 secondes avant la prochaine tentative
-                
-        except Exception as e:
-            print(f"⚠️ Tentative {attempt}/{retries} de connexion à la DB échouée : {e}")
-            if attempt == retries:
-                print("❌ Échec définitif de la connexion à la DB. Arrêt du bot.")
-                raise e # Si ça échoue 5 fois, le bot plante volontairement pour que Railway le redémarre
-            await asyncio.sleep(delay) # Attend 3 secondes avant la prochaine tentative
+                raise e
+            await asyncio.sleep(delay)
 
-# ------- FONCTIONS D'ACCÈS -------
+# ------- FONCTIONS D'ACCÈS (Refaites avec le Pool) -------
 
 async def save_dossier_personnel(
     prenom: str,
@@ -104,8 +102,7 @@ async def save_dossier_personnel(
     contact_urgence: str,
     created_by: int,
 ):
-    conn = await get_db_connection()
-    try:
+    async with db_pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO dossiers_personnel (prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -117,30 +114,22 @@ async def save_dossier_personnel(
                 updated_at = EXCLUDED.updated_at
         """, prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by,
            datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat())
-    finally:
-        await conn.close()
 
 async def get_dossier_personnel(prenom: str, nom: str) -> Optional[dict]:
-    conn = await get_db_connection()
-    try:
+    async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM dossiers_personnel WHERE prenom = $1 AND nom = $2",
             prenom, nom
         )
         return dict(row) if row else None
-    finally:
-        await conn.close()
 
 async def search_dossiers_personnel(query: str, limit: int = 25) -> List[dict]:
-    conn = await get_db_connection()
-    try:
+    async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM dossiers_personnel WHERE prenom ILIKE $1 OR nom ILIKE $1 ORDER BY nom, prenom LIMIT $2",
             f"%{query}%", limit
         )
         return [dict(row) for row in rows]
-    finally:
-        await conn.close()
 
 async def get_dossier_complet(identifiant: str) -> Optional[dict]:
     parts = identifiant.strip().split()
@@ -154,25 +143,19 @@ async def get_dossier_complet(identifiant: str) -> Optional[dict]:
     return resultats[0] if resultats else None
 
 async def list_all_personnel(limit: int = 50) -> List[dict]:
-    conn = await get_db_connection()
-    try:
+    async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM dossiers_personnel ORDER BY nom, prenom LIMIT $1", limit
         )
         return [dict(row) for row in rows]
-    finally:
-        await conn.close()
 
 async def delete_dossier_personnel(prenom: str, nom: str) -> bool:
-    conn = await get_db_connection()
-    try:
+    async with db_pool.acquire() as conn:
         result = await conn.execute(
             "DELETE FROM dossiers_personnel WHERE prenom = $1 AND nom = $2",
             prenom, nom
         )
         return result != "DELETE 0"
-    finally:
-        await conn.close()
 
 # Interventions
 async def save_dossier_intervention(
@@ -186,8 +169,7 @@ async def save_dossier_intervention(
     created_by: int,
     created_by_name: str,
 ) -> int:
-    conn = await get_db_connection()
-    try:
+    async with db_pool.acquire() as conn:
         row = await conn.fetchrow("""
             INSERT INTO dossiers_intervention (patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture, created_by, created_by_name, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -195,48 +177,33 @@ async def save_dossier_intervention(
         """, patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture,
            created_by, created_by_name, datetime.now(timezone.utc).isoformat())
         return row["id"]
-    finally:
-        await conn.close()
 
 async def get_interventions_for_patient(prenom: str, nom: str, limit: int = 5) -> List[dict]:
-    conn = await get_db_connection()
-    try:
+    async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM dossiers_intervention WHERE patient_prenom = $1 AND patient_nom = $2 ORDER BY id DESC LIMIT $3",
             prenom, nom, limit
         )
         return [dict(row) for row in rows]
-    finally:
-        await conn.close()
 
 async def list_recent_interventions(limit: int = 10) -> List[dict]:
-    conn = await get_db_connection()
-    try:
+    async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT $1", limit
         )
         return [dict(row) for row in rows]
-    finally:
-        await conn.close()
 
 async def delete_intervention(record_id: int) -> bool:
-    conn = await get_db_connection()
-    try:
+    async with db_pool.acquire() as conn:
         result = await conn.execute("DELETE FROM dossiers_intervention WHERE id = $1", record_id)
         return result != "DELETE 0"
-    finally:
-        await conn.close()
 
 async def update_statut_facture(record_id: int, statut: str):
-    conn = await get_db_connection()
-    try:
+    async with db_pool.acquire() as conn:
         await conn.execute(
             "UPDATE dossiers_intervention SET statut_facture = $1 WHERE id = $2",
             statut, record_id
         )
-    finally:
-        await conn.close()
-
 
 
 # ---------- EXPORT PDF ----------
@@ -1780,7 +1747,11 @@ async def triage(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
+    # On crée le pool AVANT tout
+    await create_db_pool()
+    # Puis on initie les tables
     await init_db()
+    
     logger.info(f"✅ Connecté en tant que {bot.user} (ID: {bot.user.id})")
     print(f"✅ Connecté en tant que {bot.user}")
     print(f"📋 Le bot est sur {len(bot.guilds)} serveur(s) :")
