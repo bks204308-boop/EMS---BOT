@@ -1546,7 +1546,7 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, 
 
     # === AFFICHER LE DOSSIER COMPLET (définitif) ===
     embed_final = discord.Embed(
-        title=f"🩺 Dossier Médical — {dossier_updated['prenom']} {dossier_updated['nom']}",
+        title=f"🩸 Analyse sanguine terminée — {dossier_updated['prenom']} {dossier_updated['nom']}",
         color=discord.Color.green()
     )
     embed_final.add_field(name="Âge", value=dossier_updated["age"] or "Non renseigné", inline=True)
