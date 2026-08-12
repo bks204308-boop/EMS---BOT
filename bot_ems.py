@@ -607,7 +607,7 @@ async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dic
         inline=True,
     )
     embed.add_field(
-        name="Groupe sanguin", value=data["groupe_sanguin"] or "N/A", inline=True
+        name="Groupe sanguin", value="Non renseigné (à définir via /analyse_sanguine)", inline=True
     )
     embed.add_field(name="Pouls", value=data["pouls"] or "N/A", inline=True)
     embed.add_field(name="Respiration", value=data["respiration"] or "N/A", inline=True)
@@ -637,7 +637,7 @@ async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dic
     await save_dossier_personnel(
         nom=data["nom"],
         age=data["age"],
-        groupe_sanguin=data["groupe_sanguin"],
+        groupe_sanguin="",  # Le groupe s'ajoutera via l'analyse sanguine
         allergies=data["allergies"],
         contact_urgence=f"Visite du {data['date_visite']} - Dr {data['medecin_ems']}",
         created_by=interaction.user.id,
@@ -693,9 +693,6 @@ class DossierMedicalModal4(discord.ui.Modal, title="Dossier Médical (4/4) - Con
 
 class DossierMedicalModal3(discord.ui.Modal, title="Dossier Médical (3/4) - Examen clinique"):
     poids = discord.ui.TextInput(label="Poids", placeholder="kg", required=False)
-    groupe_sanguin = discord.ui.TextInput(
-        label="Groupe sanguin", placeholder="Ex: A+", required=False
-    )
     pouls = discord.ui.TextInput(
         label="Pouls", placeholder="Normal / Rapide / Lent", required=False
     )
@@ -714,7 +711,6 @@ class DossierMedicalModal3(discord.ui.Modal, title="Dossier Médical (3/4) - Exa
         self.data.update(
             {
                 "poids": self.poids.value,
-                "groupe_sanguin": self.groupe_sanguin.value,
                 "pouls": self.pouls.value,
                 "respiration": self.respiration.value,
                 "vision": self.vision.value,
@@ -810,7 +806,6 @@ _MODIF_LABELS = {
     "nouveaux_antecedents": "Antécédents chirurgicaux",
     "nouvelle_taille": "Taille",
     "nouveau_poids": "Poids",
-    "nouveau_groupe": "Groupe sanguin",
     "nouveau_pouls": "Pouls",
     "nouvelle_respiration": "Respiration",
     "nouvelle_vision": "Vision",
@@ -924,9 +919,6 @@ class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen
     nouveau_poids = discord.ui.TextInput(
         label="Nouveau Poids", placeholder="kg", required=False
     )
-    nouveau_groupe = discord.ui.TextInput(
-        label="Nouveau Groupe sanguin", placeholder="Ex: A+", required=False
-    )
     nouveau_pouls = discord.ui.TextInput(
         label="Nouveau Pouls", placeholder="Normal / Rapide / Lent", required=False
     )
@@ -944,7 +936,6 @@ class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen
             {
                 "nouvelle_taille": self.nouvelle_taille.value,
                 "nouveau_poids": self.nouveau_poids.value,
-                "nouveau_groupe": self.nouveau_groupe.value,
                 "nouveau_pouls": self.nouveau_pouls.value,
                 "nouvelle_respiration": self.nouvelle_respiration.value,
             }
@@ -1692,11 +1683,6 @@ class ConfirmDeleteView(discord.ui.View):
         # Supprimer le dossier personnel
         success_personnel = await delete_dossier_personnel(self.nom)
         
-        # Supprimer les interventions associées (optionnel)
-        # Note: Vous pouvez ajouter une fonction pour supprimer toutes les interventions d'un patient
-        # Pour l'instant, on les garde avec le nom du patient
-        # success_interventions = await delete_all_interventions_for_patient(self.nom)
-        
         if success_personnel:
             embed = discord.Embed(
                 title="✅ Patient supprimé",
@@ -1906,7 +1892,7 @@ async def dossier_voir(interaction: discord.Interaction, nom: str):
     )
     embed.add_field(name="Âge", value=dossier["age"] or "N/A", inline=True)
     embed.add_field(
-        name="Groupe sanguin", value=dossier["groupe_sanguin"] or "N/A", inline=True
+        name="Groupe sanguin", value=dossier["groupe_sanguin"] or "Non renseigné", inline=True
     )
     embed.add_field(
         name="Allergies / Antécédents",
@@ -1982,39 +1968,13 @@ async def dossier_supprimer_intervention(interaction: discord.Interaction, id: i
             f"Aucun dossier d'intervention n°{id} trouvé.", ephemeral=True
         )
 
-@bot.tree.command(
-    name="dossier_supprimer_personnel",
-    description="Supprimer le dossier personnel d'un personnage",
-)
-@app_commands.describe(nom="Nom du personnage")
-async def dossier_supprimer_personnel(interaction: discord.Interaction, nom: str):
-    success = await delete_dossier_personnel(nom)
-    if success:
-        await interaction.response.send_message(
-            f"Dossier personnel de {nom} supprimé.", ephemeral=True
-        )
-    else:
-        await interaction.response.send_message(
-            f"Aucun dossier trouvé pour {nom}.", ephemeral=True
-        )
-
-@dossier_supprimer_personnel.autocomplete("nom")
-async def dossier_supprimer_nom_autocomplete(
-    interaction: discord.Interaction, current: str
-):
-    if not current:
-        dossiers = await list_all_personnel(25)
-        return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
-    resultats = await search_dossiers_personnel(current, 25)
-    return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
-
-# ---------- ANALYSES MÉDICALES ----------
+# ---------- ANALYSE SANGUINE ----------
 import random
 from datetime import datetime
 
 ANALYSES_DATA = {
     "sanguine": {
-        "label": "🧪 Analyse Sanguine",
+        "label": "Analyse Sanguine",
         "emoji": "🩸",
         "parametres": {
             "globules_rouges": {
@@ -2064,108 +2024,6 @@ ANALYSES_DATA = {
                 "unite": "mg/dL",
                 "normal": {"min": 40, "max": 150},
                 "valeurs_possibles": [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 180, 200, 250, 300]
-            }
-        }
-    },
-    "urinaire": {
-        "label": "💧 Analyse Urinaire",
-        "emoji": "💧",
-        "parametres": {
-            "ph": {
-                "label": "pH urinaire",
-                "unite": "",
-                "normal": {"min": 4.5, "max": 8.0},
-                "valeurs_possibles": [4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0]
-            },
-            "densite": {
-                "label": "Densité",
-                "unite": "",
-                "normal": {"min": 1.005, "max": 1.030},
-                "valeurs_possibles": [1.002, 1.005, 1.008, 1.010, 1.012, 1.015, 1.018, 1.020, 1.022, 1.025, 1.028, 1.030, 1.032, 1.035]
-            },
-            "proteines": {
-                "label": "Protéines",
-                "unite": "mg/dL",
-                "normal": {"min": 0, "max": 10},
-                "valeurs_possibles": [0, 0, 0, 0, 0, 5, 5, 10, 10, 15, 20, 30, 50, 100, 200, 300]
-            },
-            "glucose": {
-                "label": "Glucose",
-                "unite": "mg/dL",
-                "normal": {"min": 0, "max": 15},
-                "valeurs_possibles": [0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 10, 15, 20, 30, 50, 80, 100, 150, 200]
-            },
-            "leucocytes": {
-                "label": "Leucocytes",
-                "unite": "/µL",
-                "normal": {"min": 0, "max": 10},
-                "valeurs_possibles": [0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 10, 15, 20, 30, 50, 80, 100, 200, 500]
-            },
-            "sang": {
-                "label": "Sang",
-                "unite": "",
-                "normal": {"min": 0, "max": 0},
-                "valeurs_possibles": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 3]
-            }
-        }
-    },
-    "hormonale": {
-        "label": "🧬 Analyse Hormonale",
-        "emoji": "🧬",
-        "parametres": {
-            "tsh": {
-                "label": "TSH",
-                "unite": "mIU/L",
-                "normal": {"min": 0.4, "max": 4.0},
-                "valeurs_possibles": [0.2, 0.3, 0.4, 0.5, 0.8, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 8.0, 10.0]
-            },
-            "t4_libre": {
-                "label": "T4 libre",
-                "unite": "ng/dL",
-                "normal": {"min": 0.8, "max": 2.0},
-                "valeurs_possibles": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.5]
-            },
-            "cortisol": {
-                "label": "Cortisol (matin)",
-                "unite": "µg/dL",
-                "normal": {"min": 6, "max": 23},
-                "valeurs_possibles": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 30, 35, 40]
-            },
-            "testosterone": {
-                "label": "Testostérone",
-                "unite": "ng/dL",
-                "normal": {"min": 300, "max": 1000},
-                "valeurs_possibles": [200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000, 1050, 1100, 1200]
-            }
-        }
-    },
-    "infectieuse": {
-        "label": "🦠 Analyse Infectieuse",
-        "emoji": "🦠",
-        "parametres": {
-            "pcr_covid": {
-                "label": "PCR COVID-19",
-                "unite": "",
-                "normal": {"min": 0, "max": 0},
-                "valeurs_possibles": ["Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Positif (faible)", "Positif (modéré)", "Positif (élevé)"]
-            },
-            "angine_strep": {
-                "label": "Test Streptocoque A",
-                "unite": "",
-                "normal": {"min": 0, "max": 0},
-                "valeurs_possibles": ["Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Positif", "Positif", "Positif"]
-            },
-            "mononucleose": {
-                "label": "Test Mononucléose",
-                "unite": "",
-                "normal": {"min": 0, "max": 0},
-                "valeurs_possibles": ["Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Positif", "Positif"]
-            },
-            "infection_urinaire": {
-                "label": "Infection urinaire",
-                "unite": "",
-                "normal": {"min": 0, "max": 0},
-                "valeurs_possibles": ["Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Négatif", "Positif E. coli", "Positif Klebsiella", "Positif Pseudomonas"]
             }
         }
     }
@@ -2225,93 +2083,12 @@ def generer_rapport_complet(type_analyse: str, patient: str) -> dict:
         "couleur": couleur
     }
 
-class TypeAnalyseSelect(discord.ui.Select):
-    def __init__(self, patient: str):
-        self.patient = patient
-        options = [
-            discord.SelectOption(label=data["label"], value=key, emoji=data["emoji"])
-            for key, data in ANALYSES_DATA.items()
-        ]
-        super().__init__(placeholder="Choisis le type d'analyse...", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        type_analyse = self.values[0]
-        rapport = generer_rapport_complet(type_analyse, self.patient)
-        data = ANALYSES_DATA[type_analyse]
-        
-        embed = discord.Embed(
-            title=f"{data['emoji']} {data['label']}",
-            description=f"**Patient :** {self.patient}",
-            color=rapport["couleur"]
-        )
-        
-        embed.add_field(
-            name="📅 Date de l'analyse",
-            value=datetime.now().strftime("%d/%m/%Y à %H:%M"),
-            inline=False
-        )
-        
-        for param_key, resultat in rapport["resultats"].items():
-            param_data = data["parametres"][param_key]
-            valeur = resultat["valeur"]
-            unite = resultat["unite"]
-            est_normal = resultat["est_normal"]
-            
-            if isinstance(valeur, (int, float)):
-                valeur_str = f"{valeur} {unite}"
-            else:
-                valeur_str = f"{valeur}"
-            
-            statut = "✅" if est_normal else "⚠️"
-            if not est_normal and isinstance(valeur, (int, float)):
-                if "normal" in param_data:
-                    if valeur < param_data["normal"]["min"]:
-                        statut = "🔽 (bas)"
-                    elif valeur > param_data["normal"]["max"]:
-                        statut = "🔼 (élevé)"
-            
-            plage = ""
-            if "normal" in param_data and isinstance(valeur, (int, float)):
-                plage = f" *[Normale: {param_data['normal']['min']} - {param_data['normal']['max']} {unite}]*"
-            
-            embed.add_field(
-                name=f"{statut} {param_data['label']}",
-                value=f"**{valeur_str}**{plage}",
-                inline=True
-            )
-        
-        embed.add_field(name="📋 Conclusion", value=rapport["conclusion"], inline=False)
-        embed.set_footer(text=f"Analyse demandée par {interaction.user.display_name} • ID: {random.randint(1000, 9999)}")
-        
-        view = ReanalyseView(self.patient)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-class TypeAnalyseView(SafeView):
-    def __init__(self, patient: str):
-        super().__init__(timeout=180)
-        self.add_item(TypeAnalyseSelect(patient))
-
-class ReanalyseView(SafeView):
-    def __init__(self, patient: str):
-        super().__init__(timeout=120)
-        self.patient = patient
-
-    @discord.ui.button(label="🔄 Nouvelle analyse", style=discord.ButtonStyle.primary)
-    async def reanalyser(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(
-            title="🧪 Sélection d'analyse",
-            description=f"Choisis le type d'analyse pour **{self.patient}** :",
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text="Les résultats sont générés aléatoirement à chaque analyse")
-        await interaction.response.edit_message(embed=embed, view=TypeAnalyseView(self.patient))
-
 @bot.tree.command(
-    name="analyse",
-    description="Effectuer une analyse médicale (sanguine, urinaire, hormonale ou infectieuse)"
+    name="analyse_sanguine",
+    description="Effectuer une analyse sanguine complète et enregistrer le groupe sanguin du patient"
 )
 @app_commands.describe(patient="Nom du patient à analyser")
-async def analyse_medicale(interaction: discord.Interaction, patient: str):
+async def analyse_sanguine(interaction: discord.Interaction, patient: str):
     dossier = await get_dossier_personnel(patient)
     if not dossier:
         await interaction.response.send_message(
@@ -2320,28 +2097,69 @@ async def analyse_medicale(interaction: discord.Interaction, patient: str):
             ephemeral=True
         )
         return
+
+    # Vérifier si le patient a un groupe sanguin, sinon lui en attribuer un aléatoire
+    groupe_sanguin = dossier.get("groupe_sanguin")
+    if not groupe_sanguin:
+        groupes = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+        groupe_sanguin = random.choice(groupes)
+        # Mettre à jour le dossier du patient avec le nouveau groupe sanguin
+        await save_dossier_personnel(
+            nom=patient,
+            age=dossier["age"],
+            groupe_sanguin=groupe_sanguin,
+            allergies=dossier["allergies"],
+            contact_urgence=dossier["contact_urgence"],
+            created_by=interaction.user.id
+        )
+    
+    # Générer le rapport sanguin
+    rapport = generer_rapport_complet("sanguine", patient)
+    data = ANALYSES_DATA["sanguine"]
     
     embed = discord.Embed(
-        title="🧪 Sélection d'analyse",
-        description=f"Choisis le type d'analyse pour **{patient}** :",
-        color=discord.Color.blue()
+        title=f"🩸 {data['label']}",
+        description=f"**Patient :** {patient}",
+        color=rapport["couleur"]
     )
+    embed.add_field(name="📅 Date de l'analyse", value=datetime.now().strftime("%d/%m/%Y à %H:%M"), inline=False)
+    embed.add_field(name="🩸 Groupe Sanguin", value=f"**{groupe_sanguin}**", inline=False)
     
-    types_list = "\n".join(f"• {data['emoji']} **{data['label']}**" for data in ANALYSES_DATA.values())
-    embed.add_field(name="📋 Types d'analyses disponibles", value=types_list, inline=False)
-    embed.set_footer(text="Les résultats sont générés aléatoirement à chaque analyse")
+    for param_key, resultat in rapport["resultats"].items():
+        param_data = data["parametres"][param_key]
+        valeur = resultat["valeur"]
+        unite = resultat["unite"]
+        est_normal = resultat["est_normal"]
+        
+        if isinstance(valeur, (int, float)):
+            valeur_str = f"{valeur} {unite}"
+        else:
+            valeur_str = f"{valeur}"
+        
+        statut = "✅" if est_normal else "⚠️"
+        if not est_normal and isinstance(valeur, (int, float)):
+            if valeur < param_data["normal"]["min"]:
+                statut = "🔽 (bas)"
+            elif valeur > param_data["normal"]["max"]:
+                statut = "🔼 (élevé)"
+        
+        plage = ""
+        if "normal" in param_data and isinstance(valeur, (int, float)):
+            plage = f" *[Normale: {param_data['normal']['min']} - {param_data['normal']['max']} {unite}]*"
+        
+        embed.add_field(
+            name=f"{statut} {param_data['label']}",
+            value=f"**{valeur_str}**{plage}",
+            inline=True
+        )
     
-    embed.add_field(
-        name="📂 Dossier patient",
-        value=f"Nom: **{dossier['nom']}**\nÂge: **{dossier['age'] or 'N/A'}**\nGroupe sanguin: **{dossier['groupe_sanguin'] or 'N/A'}**",
-        inline=False
-    )
+    embed.add_field(name="📋 Conclusion", value=rapport["conclusion"], inline=False)
+    embed.set_footer(text=f"Analyse demandée par {interaction.user.display_name}")
     
-    view = TypeAnalyseView(patient)
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@analyse_medicale.autocomplete("patient")
-async def analyse_medicale_patient_autocomplete(interaction: discord.Interaction, current: str):
+@analyse_sanguine.autocomplete("patient")
+async def analyse_sanguine_patient_autocomplete(interaction: discord.Interaction, current: str):
     if not current:
         dossiers = await list_all_personnel(25)
         return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
