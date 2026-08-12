@@ -1,7 +1,6 @@
 import io
 import logging
 import os
-pip install pynacl
 import random
 import textwrap
 import traceback
