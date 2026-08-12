@@ -31,14 +31,16 @@ async def init_db():
             """
             CREATE TABLE IF NOT EXISTS dossiers_personnel (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nom TEXT UNIQUE,
+                prenom TEXT,
+                nom TEXT,
                 age TEXT,
                 groupe_sanguin TEXT,
                 allergies TEXT,
                 contact_urgence TEXT,
                 created_by INTEGER,
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                UNIQUE(prenom, nom)
             )
             """
         )
@@ -46,7 +48,8 @@ async def init_db():
             """
             CREATE TABLE IF NOT EXISTS dossiers_intervention (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                patient_name TEXT,
+                patient_prenom TEXT,
+                patient_nom TEXT,
                 blessure TEXT,
                 soins TEXT,
                 transport TEXT,
@@ -61,6 +64,7 @@ async def init_db():
         await db.commit()
 
 async def save_dossier_personnel(
+    prenom: str,
     nom: str,
     age: str,
     groupe_sanguin: str,
@@ -71,9 +75,9 @@ async def save_dossier_personnel(
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
-            INSERT INTO dossiers_personnel (nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(nom) DO UPDATE SET
+            INSERT INTO dossiers_personnel (prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(prenom, nom) DO UPDATE SET
                 age=excluded.age,
                 groupe_sanguin=excluded.groupe_sanguin,
                 allergies=excluded.allergies,
@@ -81,6 +85,7 @@ async def save_dossier_personnel(
                 updated_at=excluded.updated_at
             """,
             (
+                prenom,
                 nom,
                 age,
                 groupe_sanguin,
@@ -93,27 +98,58 @@ async def save_dossier_personnel(
         )
         await db.commit()
 
-async def get_dossier_personnel(nom: str) -> Optional[dict]:
+async def get_dossier_personnel(prenom: str, nom: str) -> Optional[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM dossiers_personnel WHERE nom = ?", (nom,)
+            "SELECT * FROM dossiers_personnel WHERE prenom = ? AND nom = ?", (prenom, nom)
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-async def search_dossiers_personnel(nom_query: str, limit: int = 25) -> List[dict]:
+async def search_dossiers_personnel(query: str, limit: int = 25) -> List[dict]:
+    """Recherche par prénom ou nom (contient)"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM dossiers_personnel WHERE nom LIKE ? ORDER BY nom LIMIT ?",
-            (f"%{nom_query}%", limit),
+            "SELECT * FROM dossiers_personnel WHERE prenom LIKE ? OR nom LIKE ? ORDER BY nom, prenom LIMIT ?",
+            (f"%{query}%", f"%{query}%", limit),
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
+async def get_dossier_complet(identifiant: str) -> Optional[dict]:
+    """Cherche par nom complet (prenom + nom) ou par nom seul"""
+    parts = identifiant.strip().split()
+    if len(parts) >= 2:
+        prenom = parts[0]
+        nom = " ".join(parts[1:])
+        dossier = await get_dossier_personnel(prenom, nom)
+        if dossier:
+            return dossier
+    resultats = await search_dossiers_personnel(identifiant, 1)
+    return resultats[0] if resultats else None
+
+async def list_all_personnel(limit: int = 50) -> List[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM dossiers_personnel ORDER BY nom, prenom LIMIT ?", (limit,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+async def delete_dossier_personnel(prenom: str, nom: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "DELETE FROM dossiers_personnel WHERE prenom = ? AND nom = ?", (prenom, nom)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
 async def save_dossier_intervention(
-    patient_name: str,
+    patient_prenom: str,
+    patient_nom: str,
     blessure: str,
     soins: str,
     transport: str,
@@ -125,11 +161,12 @@ async def save_dossier_intervention(
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            INSERT INTO dossiers_intervention (patient_name, blessure, soins, transport, facture, statut_facture, created_by, created_by_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO dossiers_intervention (patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture, created_by, created_by_name, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                patient_name,
+                patient_prenom,
+                patient_nom,
                 blessure,
                 soins,
                 transport,
@@ -143,22 +180,12 @@ async def save_dossier_intervention(
         await db.commit()
         return cursor.lastrowid
 
-async def update_statut_facture(record_id: int, statut: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE dossiers_intervention SET statut_facture = ? WHERE id = ?",
-            (statut, record_id),
-        )
-        await db.commit()
-
-async def get_interventions_for_patient(
-    patient_name: str, limit: int = 5
-) -> List[dict]:
+async def get_interventions_for_patient(prenom: str, nom: str, limit: int = 5) -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM dossiers_intervention WHERE patient_name = ? ORDER BY id DESC LIMIT ?",
-            (patient_name, limit),
+            "SELECT * FROM dossiers_intervention WHERE patient_prenom = ? AND patient_nom = ? ORDER BY id DESC LIMIT ?",
+            (prenom, nom, limit),
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
@@ -167,36 +194,24 @@ async def list_recent_interventions(limit: int = 10) -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT ?",
-            (limit,),
+            "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT ?", (limit,)
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
 async def delete_intervention(record_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "DELETE FROM dossiers_intervention WHERE id = ?", (record_id,)
-        )
+        cursor = await db.execute("DELETE FROM dossiers_intervention WHERE id = ?", (record_id,))
         await db.commit()
         return cursor.rowcount > 0
 
-async def delete_dossier_personnel(nom: str) -> bool:
+async def update_statut_facture(record_id: int, statut: str):
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "DELETE FROM dossiers_personnel WHERE nom = ?", (nom,)
+        await db.execute(
+            "UPDATE dossiers_intervention SET statut_facture = ? WHERE id = ?",
+            (statut, record_id),
         )
         await db.commit()
-        return cursor.rowcount > 0
-
-async def list_all_personnel(limit: int = 50) -> List[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_personnel ORDER BY nom LIMIT ?", (limit,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
 
 # ---------- EXPORT PDF ----------
 COLOR_BLUE = (0, 102, 153)
@@ -304,7 +319,7 @@ def generate_pdf_dossier_medical(data: dict, footer_info: str = "") -> io.BytesI
     pdf.set_xy(14, 37)
     pdf.set_font("Helvetica", "B", 12)
     pdf.set_text_color(*COLOR_BLUE)
-    pdf.cell(100, 6, clean_pdf_text(f"Patient : {data.get('nom', 'N/A')}"))
+    pdf.cell(100, 6, clean_pdf_text(f"Patient : {data.get('prenom', 'N/A')} {data.get('nom', 'N/A')}"))
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*COLOR_TEXT_DARK)
     pdf.cell(80, 6, clean_pdf_text(f"Date de visite : {data.get('date_visite', 'N/A')}"), align="R", ln=1)
@@ -365,7 +380,7 @@ def generate_pdf_rapport_intervention(data: dict, footer_info: str = "", record_
     pdf.set_y(60)
     pdf.draw_section_header("Informations Intervention & Patient")
     pdf.draw_key_value("Lieu de l'intervention", data.get("lieu", "N/A"))
-    pdf.draw_key_value("Identite du Patient", f"{data.get('patient_nom', 'Inconnu')} ({data.get('patient_sexe_age', 'N/A')})")
+    pdf.draw_key_value("Identite du Patient", f"{data.get('patient_prenom', 'Inconnu')} {data.get('patient_nom', '')} ({data.get('patient_sexe_age', 'N/A')})")
     pdf.draw_key_value("Etat a l'arrivee", data.get("patient_etat", "N/A"))
     pdf.draw_section_header("Soins & Procedures Effectuees")
     pdf.draw_key_value("Signes Vitaux", data.get("signes_vitaux", "N/A"), inline=True)
@@ -382,7 +397,7 @@ def generate_pdf_rapport_intervention(data: dict, footer_info: str = "", record_
     pdf.cell(70, 5, f"Signature : {clean_pdf_text(data.get('signature') or 'Non signe')}", align="R")
     return _export_buffer(pdf)
 
-def generate_pdf_facture(patient_name: str, details_list: List[str], total: str, record_id: int, status: str = "En attente", footer_info: str = "") -> io.BytesIO:
+def generate_pdf_facture(patient_prenom: str, patient_nom: str, details_list: List[str], total: str, record_id: int, status: str = "En attente", footer_info: str = "") -> io.BytesIO:
     pdf = EMSPDF(doc_type=f"Facture Medicale #{record_id}", primary_color=COLOR_SLATE)
     pdf.add_page()
     pdf.set_fill_color(*COLOR_BG_LIGHT)
@@ -391,7 +406,7 @@ def generate_pdf_facture(patient_name: str, details_list: List[str], total: str,
     pdf.set_xy(14, 37)
     pdf.set_font("Helvetica", "B", 11)
     pdf.set_text_color(*COLOR_SLATE)
-    pdf.cell(120, 6, clean_pdf_text(f"Facture a l'attention de : {patient_name}"))
+    pdf.cell(120, 6, clean_pdf_text(f"Facture a l'attention de : {patient_prenom} {patient_nom}"))
     is_paid = status.lower() in ["payee", "paye", "paid"]
     stat_color = (34, 139, 34) if is_paid else (178, 34, 34)
     pdf.set_text_color(*stat_color)
@@ -476,9 +491,10 @@ class ExportPDFView(SafeView):
         await interaction.response.send_message(file=discord.File(buf, filename=self.filename), ephemeral=True)
 
 class FacturationFinalView(SafeView):
-    def __init__(self, patient_name: str, details: List[str], total: int, record_id: int, footer: str = ""):
+    def __init__(self, patient_prenom: str, patient_nom: str, details: List[str], total: int, record_id: int, footer: str = ""):
         super().__init__(timeout=300)
-        self.patient_name = patient_name
+        self.patient_prenom = patient_prenom
+        self.patient_nom = patient_nom
         self.details = details
         self.total = total
         self.record_id = record_id
@@ -488,7 +504,8 @@ class FacturationFinalView(SafeView):
     @discord.ui.button(label="📄 Exporter en PDF", style=discord.ButtonStyle.secondary, row=0)
     async def export(self, interaction: discord.Interaction, button: discord.ui.Button):
         buf = generate_pdf_facture(
-            patient_name=self.patient_name,
+            patient_prenom=self.patient_prenom,
+            patient_nom=self.patient_nom,
             details_list=self.details,
             total=str(self.total),
             record_id=self.record_id,
@@ -512,11 +529,12 @@ class FacturationFinalView(SafeView):
         button.style = discord.ButtonStyle.secondary
         await interaction.response.edit_message(embed=embed, view=self)
 
-# ---------- FORMULAIRES ----------
+# ---------- FORMULAIRES : DOSSIER MÉDICAL ----------
 async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dict):
     embed = discord.Embed(title="**__🩺 Dossier Médical – Visite Standard__**", color=discord.Color.blue())
     embed.add_field(name="**__Identité du patient__**", value="\u200b", inline=False)
-    embed.add_field(name="**Nom & prénom**", value=data["nom"], inline=True)
+    embed.add_field(name="**Prénom**", value=data["prenom"], inline=True)
+    embed.add_field(name="**Nom**", value=data["nom"], inline=True)
     embed.add_field(name="**Âge**", value=data["age"], inline=True)
     embed.add_field(name="**Sexe**", value=data["sexe"], inline=True)
     embed.add_field(name="**Date de la visite**", value=data["date_visite"], inline=True)
@@ -542,9 +560,10 @@ async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dic
     embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
 
     await save_dossier_personnel(
+        prenom=data["prenom"],
         nom=data["nom"],
         age=data["age"],
-        groupe_sanguin="",  # ← sera rempli par l'analyse
+        groupe_sanguin="",  # sera rempli par analyse
         allergies=data["allergies"],
         contact_urgence=f"Visite du {data['date_visite']} - Dr {data['medecin_ems']}",
         created_by=interaction.user.id,
@@ -553,7 +572,7 @@ async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dic
     view = ExportPDFView(
         doc_type="dossier_medical",
         data=data,
-        filename=f"dossier_medical_{data['nom'].replace(' ', '_')}.pdf",
+        filename=f"dossier_medical_{data['prenom']}_{data['nom']}.pdf",
         footer=interaction.user.display_name,
     )
     await interaction.response.send_message(embed=embed, view=view)
@@ -581,7 +600,6 @@ class DossierMedicalModal4(discord.ui.Modal, title="Dossier Médical (4/4) - Con
 
 class DossierMedicalModal3(discord.ui.Modal, title="Dossier Médical (3/4) - Examen clinique"):
     poids = discord.ui.TextInput(label="Poids", placeholder="kg", required=False)
-    # Groupe sanguin retiré ici
     pouls = discord.ui.TextInput(label="Pouls", placeholder="Normal / Rapide / Lent", required=False)
     respiration = discord.ui.TextInput(label="Respiration", placeholder="Normale / Difficile", required=False)
     vision = discord.ui.TextInput(label="Vision", placeholder="Normale / Corrigée / Trouble", required=False)
@@ -623,7 +641,8 @@ class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Ant
         await interaction.response.send_message("✅ **Étape 2/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
 class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Identité"):
-    nom = discord.ui.TextInput(label="Nom & prénom", placeholder="Ex: Jean Dupont")
+    prenom = discord.ui.TextInput(label="Prénom", placeholder="Ex: Jean")
+    nom = discord.ui.TextInput(label="Nom de famille", placeholder="Ex: Dupont")
     age = discord.ui.TextInput(label="Âge", placeholder="Ex: 45")
     sexe = discord.ui.TextInput(label="Sexe [M / F]", placeholder="M ou F", max_length=1)
     date_visite = discord.ui.TextInput(label="Date de la visite", placeholder="JJ/MM/AAAA")
@@ -631,6 +650,7 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
 
     async def on_submit(self, interaction: discord.Interaction):
         data = {
+            "prenom": self.prenom.value,
             "nom": self.nom.value,
             "age": self.age.value,
             "sexe": self.sexe.value,
@@ -640,9 +660,10 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
         next_view = NextStepView(DossierMedicalModal2(data), label="Étape 2/4 : Antécédents ➡️")
         await interaction.response.send_message("✅ **Étape 1/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-# ---------- MODIFICATION ----------
+# ---------- FORMULAIRE : MODIFICATION ----------
 _MODIF_LABELS = {
-    "nouveau_nom": "Nom & prénom",
+    "nouveau_prenom": "Prénom",
+    "nouveau_nom": "Nom",
     "nouveau_age": "Âge",
     "nouveau_sexe": "Sexe",
     "nouvelle_date": "Date de la visite",
@@ -664,14 +685,18 @@ _MODIF_LABELS = {
     "nouvelle_signature": "Signature",
 }
 
-async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_nom: str, data: dict):
+async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_prenom: str, ancien_nom: str, data: dict):
     updates = []
     for key, label in _MODIF_LABELS.items():
         value = data.get(key)
         if value:
             suffix = " cm" if key == "nouvelle_taille" else (" kg" if key == "nouveau_poids" else "")
             updates.append(f"**{label} :** {value}{suffix}")
-    embed = discord.Embed(title="**__🩺 Modification du Dossier Médical__**", description=f"**Ancien dossier :** {ancien_nom}", color=discord.Color.gold())
+    embed = discord.Embed(
+        title="**__🩺 Modification du Dossier Médical__**",
+        description=f"**Ancien dossier :** {ancien_prenom} {ancien_nom}",
+        color=discord.Color.gold()
+    )
     if updates:
         embed.add_field(name="**Modifications effectuées**", value="\n".join(updates), inline=False)
     else:
@@ -681,13 +706,14 @@ async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_nom:
 
 class DossierModifierModal5(discord.ui.Modal, title="Modification (5/5) - Signature"):
     nouvelle_signature = discord.ui.TextInput(label="Nouvelle Signature", placeholder="Nouvelle signature", required=False)
-    def __init__(self, ancien_nom: str, data: dict):
+    def __init__(self, ancien_prenom: str, ancien_nom: str, data: dict):
         super().__init__()
+        self.ancien_prenom = ancien_prenom
         self.ancien_nom = ancien_nom
         self.data = data
     async def on_submit(self, interaction: discord.Interaction):
         self.data["nouvelle_signature"] = self.nouvelle_signature.value
-        await _finaliser_modif_dossier(interaction, self.ancien_nom, self.data)
+        await _finaliser_modif_dossier(interaction, self.ancien_prenom, self.ancien_nom, self.data)
 
 class DossierModifierModal4(discord.ui.Modal, title="Modification (4/5) - Conclusion"):
     nouvelle_vision = discord.ui.TextInput(label="Nouvelle Vision", placeholder="Normale / Corrigée / Trouble", required=False)
@@ -695,8 +721,9 @@ class DossierModifierModal4(discord.ui.Modal, title="Modification (4/5) - Conclu
     nouvelles_observations = discord.ui.TextInput(label="Nouvelles Observations", style=discord.TextStyle.paragraph, required=False)
     nouvelle_aptitude = discord.ui.TextInput(label="Nouvelle Aptitude", placeholder="Patient apte / inapte", required=False)
     nouvelles_recommandations = discord.ui.TextInput(label="Nouvelles Recommandations", placeholder="Nouvelles recommandations", required=False)
-    def __init__(self, ancien_nom: str, data: dict):
+    def __init__(self, ancien_prenom: str, ancien_nom: str, data: dict):
         super().__init__()
+        self.ancien_prenom = ancien_prenom
         self.ancien_nom = ancien_nom
         self.data = data
     async def on_submit(self, interaction: discord.Interaction):
@@ -707,7 +734,7 @@ class DossierModifierModal4(discord.ui.Modal, title="Modification (4/5) - Conclu
             "nouvelle_aptitude": self.nouvelle_aptitude.value,
             "nouvelles_recommandations": self.nouvelles_recommandations.value,
         })
-        next_view = NextStepView(DossierModifierModal5(self.ancien_nom, self.data), label="Étape 5/5 : Signature ➡️")
+        next_view = NextStepView(DossierModifierModal5(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 5/5 : Signature ➡️")
         await interaction.response.send_message("✅ **Étape 4/5 validée.** Cliquez ci-dessous pour terminer.", view=next_view, ephemeral=True)
 
 class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen clinique"):
@@ -716,8 +743,9 @@ class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen
     nouveau_groupe = discord.ui.TextInput(label="Nouveau Groupe sanguin", placeholder="Ex: A+", required=False)
     nouveau_pouls = discord.ui.TextInput(label="Nouveau Pouls", placeholder="Normal / Rapide / Lent", required=False)
     nouvelle_respiration = discord.ui.TextInput(label="Nouvelle Respiration", placeholder="Normale / Difficile", required=False)
-    def __init__(self, ancien_nom: str, data: dict):
+    def __init__(self, ancien_prenom: str, ancien_nom: str, data: dict):
         super().__init__()
+        self.ancien_prenom = ancien_prenom
         self.ancien_nom = ancien_nom
         self.data = data
     async def on_submit(self, interaction: discord.Interaction):
@@ -728,7 +756,7 @@ class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen
             "nouveau_pouls": self.nouveau_pouls.value,
             "nouvelle_respiration": self.nouvelle_respiration.value,
         })
-        next_view = NextStepView(DossierModifierModal4(self.ancien_nom, self.data), label="Étape 4/5 : Conclusion ➡️")
+        next_view = NextStepView(DossierModifierModal4(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 4/5 : Conclusion ➡️")
         await interaction.response.send_message("✅ **Étape 3/5 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
 class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antécédents"):
@@ -737,8 +765,9 @@ class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antéc
     nouvelles_maladies = discord.ui.TextInput(label="Nouvelles Maladies chroniques", placeholder="Nouvelles maladies", style=discord.TextStyle.paragraph, required=False)
     nouveaux_traitements = discord.ui.TextInput(label="Nouveaux Traitements", placeholder="Nouveaux traitements", required=False)
     nouveaux_antecedents = discord.ui.TextInput(label="Nouveaux Antécédents chirurgicaux", placeholder="Nouveaux antécédents", required=False)
-    def __init__(self, ancien_nom: str, data: dict):
+    def __init__(self, ancien_prenom: str, ancien_nom: str, data: dict):
         super().__init__()
+        self.ancien_prenom = ancien_prenom
         self.ancien_nom = ancien_nom
         self.data = data
     async def on_submit(self, interaction: discord.Interaction):
@@ -749,23 +778,30 @@ class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antéc
             "nouveaux_traitements": self.nouveaux_traitements.value,
             "nouveaux_antecedents": self.nouveaux_antecedents.value,
         })
-        next_view = NextStepView(DossierModifierModal3(self.ancien_nom, self.data), label="Étape 3/5 : Examen clinique ➡️")
+        next_view = NextStepView(DossierModifierModal3(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 3/5 : Examen clinique ➡️")
         await interaction.response.send_message("✅ **Étape 2/5 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
 class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/5) - Identité"):
-    ancien_nom = discord.ui.TextInput(label="Ancien Nom & prénom", placeholder="Nom actuel dans le dossier", required=True)
-    nouveau_nom = discord.ui.TextInput(label="Nouveau Nom & prénom", placeholder="Nouveau nom", required=False)
+    ancien_prenom = discord.ui.TextInput(label="Ancien Prénom", placeholder="Prénom actuel", required=True)
+    ancien_nom = discord.ui.TextInput(label="Ancien Nom", placeholder="Nom actuel", required=True)
+    nouveau_prenom = discord.ui.TextInput(label="Nouveau Prénom", placeholder="Nouveau prénom", required=False)
+    nouveau_nom = discord.ui.TextInput(label="Nouveau Nom", placeholder="Nouveau nom", required=False)
     nouveau_age = discord.ui.TextInput(label="Nouvel Âge", placeholder="Nouvel âge", required=False)
     nouveau_sexe = discord.ui.TextInput(label="Nouveau Sexe [M/F]", placeholder="M ou F", max_length=1, required=False)
     nouvelle_date = discord.ui.TextInput(label="Nouvelle Date de visite", placeholder="JJ/MM/AAAA", required=False)
+
     async def on_submit(self, interaction: discord.Interaction):
         data = {
+            "nouveau_prenom": self.nouveau_prenom.value,
             "nouveau_nom": self.nouveau_nom.value,
             "nouveau_age": self.nouveau_age.value,
             "nouveau_sexe": self.nouveau_sexe.value,
             "nouvelle_date": self.nouvelle_date.value,
         }
-        next_view = NextStepView(DossierModifierModal2(self.ancien_nom.value, data), label="Étape 2/5 : Antécédents ➡️")
+        next_view = NextStepView(
+            DossierModifierModal2(self.ancien_prenom.value, self.ancien_nom.value, data),
+            label="Étape 2/5 : Antécédents ➡️"
+        )
         await interaction.response.send_message("✅ **Étape 1/5 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
 # ---------- RAPPORT INTERVENTION ----------
@@ -778,12 +814,19 @@ async def _finaliser_rapport_intervention(interaction: discord.Interaction, data
     embed.add_field(name="**Nom(s) du/des EMS présent(s)**", value=data["ems_noms"], inline=True)
     embed.add_field(name="\n```Lieu de l'intervention```", value=f"-> {data['lieu']}", inline=False)
     embed.add_field(name="\n```Informations sur le patient```", value="\u200b", inline=False)
-    embed.add_field(name="Nom RP", value=data["patient_nom"], inline=True)
+    embed.add_field(name="Prénom", value=data["patient_prenom"], inline=True)
+    embed.add_field(name="Nom", value=data["patient_nom"], inline=True)
     embed.add_field(name="Sexe / Âge", value=data["patient_sexe_age"], inline=True)
     embed.add_field(name="État à l'arrivée", value=data["patient_etat"], inline=False)
-    dossier = await get_dossier_personnel(data["patient_nom"])
+
+    dossier = await get_dossier_personnel(data["patient_prenom"], data["patient_nom"])
     if dossier:
-        embed.add_field(name="⚠️ Rappel dossier personnel", value=f"Groupe sanguin : **{dossier['groupe_sanguin'] or 'Inconnu'}**\nAllergies : **{dossier['allergies'] or 'Aucune'}**", inline=False)
+        embed.add_field(
+            name="⚠️ Rappel dossier personnel",
+            value=f"Groupe sanguin : **{dossier['groupe_sanguin'] or 'Inconnu'}**\nAllergies : **{dossier['allergies'] or 'Aucune'}**",
+            inline=False
+        )
+
     embed.add_field(name="\n```Procédure effectuée```", value="\u200b", inline=False)
     embed.add_field(name="Vérification des signes vitaux", value=data["signes_vitaux"], inline=True)
     embed.add_field(name="Premiers soins", value=data["premiers_soins"] or "Aucun", inline=True)
@@ -796,7 +839,8 @@ async def _finaliser_rapport_intervention(interaction: discord.Interaction, data
     embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
 
     record_id = await save_dossier_intervention(
-        patient_name=data["patient_nom"],
+        patient_prenom=data["patient_prenom"],
+        patient_nom=data["patient_nom"],
         blessure=data["patient_etat"],
         soins=f"Soins : {data['premiers_soins'] or 'Aucun'}\nStabilisation : {data['stabilisation'] or 'Aucune'}",
         transport=f"{data['transport']} -> {data['destination'] or 'N/A'}",
@@ -806,7 +850,13 @@ async def _finaliser_rapport_intervention(interaction: discord.Interaction, data
         created_by_name=interaction.user.display_name,
     )
 
-    view = ExportPDFView(doc_type="rapport_intervention", data=data, filename=f"rapport_intervention_{record_id}.pdf", footer=interaction.user.display_name, record_id=record_id)
+    view = ExportPDFView(
+        doc_type="rapport_intervention",
+        data=data,
+        filename=f"rapport_intervention_{record_id}.pdf",
+        footer=interaction.user.display_name,
+        record_id=record_id,
+    )
     await interaction.response.send_message(embed=embed, view=view)
 
 class RapportInterventionModal4(discord.ui.Modal, title="Rapport EMS (4/4) - Conclusion"):
@@ -841,18 +891,24 @@ class RapportInterventionModal3(discord.ui.Modal, title="Rapport EMS (3/4) - Pro
 
 class RapportInterventionModal2(discord.ui.Modal, title="Rapport EMS (2/4) - Patient"):
     lieu = discord.ui.TextInput(label="Lieu de l'intervention", placeholder="Adresse ou lieu précis", style=discord.TextStyle.paragraph)
-    patient_nom = discord.ui.TextInput(label="Nom RP", placeholder="Nom et prénom")
+    patient_prenom = discord.ui.TextInput(label="Prénom du patient", placeholder="Prénom")
+    patient_nom = discord.ui.TextInput(label="Nom du patient", placeholder="Nom de famille")
     patient_sexe_age = discord.ui.TextInput(label="Sexe / Âge", placeholder="M/F, âge")
     patient_etat = discord.ui.TextInput(label="État à l'arrivée", placeholder="Inconscient / Conscient mais blessé / Hémorragie, etc.", style=discord.TextStyle.paragraph)
     signes_vitaux = discord.ui.TextInput(label="Vérification des signes vitaux", placeholder="Oui / Non")
-    def __init__(self, data: dict, patient_name: str = None):
+
+    def __init__(self, data: dict, patient_prenom: str = None, patient_nom: str = None):
         super().__init__()
         self.data = data
-        if patient_name:
-            self.patient_nom.default = patient_name
+        if patient_prenom:
+            self.patient_prenom.default = patient_prenom
+        if patient_nom:
+            self.patient_nom.default = patient_nom
+
     async def on_submit(self, interaction: discord.Interaction):
         self.data.update({
             "lieu": self.lieu.value,
+            "patient_prenom": self.patient_prenom.value,
             "patient_nom": self.patient_nom.value,
             "patient_sexe_age": self.patient_sexe_age.value,
             "patient_etat": self.patient_etat.value,
@@ -867,9 +923,12 @@ class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Hora
     heure_arrivee = discord.ui.TextInput(label="Heure d'arrivée sur les lieux", placeholder="HH:MM")
     heure_fin = discord.ui.TextInput(label="Heure de fin d'intervention", placeholder="HH:MM")
     ems_noms = discord.ui.TextInput(label="Nom(s) du/des EMS présent(s)", placeholder="Nom RP")
-    def __init__(self, patient_name: str = None):
+
+    def __init__(self, patient_prenom: str = None, patient_nom: str = None):
         super().__init__()
-        self.patient_name = patient_name
+        self.patient_prenom = patient_prenom
+        self.patient_nom = patient_nom
+
     async def on_submit(self, interaction: discord.Interaction):
         data = {
             "date": self.date.value,
@@ -878,7 +937,10 @@ class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Hora
             "heure_fin": self.heure_fin.value,
             "ems_noms": self.ems_noms.value,
         }
-        next_view = NextStepView(RapportInterventionModal2(data, patient_name=self.patient_name), label="Étape 2/4 : Patient ➡️")
+        next_view = NextStepView(
+            RapportInterventionModal2(data, patient_prenom=self.patient_prenom, patient_nom=self.patient_nom),
+            label="Étape 2/4 : Patient ➡️"
+        )
         await interaction.response.send_message("✅ **Étape 1/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
 # ---------- FACTURATION ----------
@@ -964,11 +1026,12 @@ class FacturationSession:
     def __init__(self):
         self.total = 0
         self.details: List[str] = []
-        self.patient_name: str = "Non renseigné"
+        self.patient_prenom: str = ""
+        self.patient_nom: str = ""
 
 def build_facturation_embed(session: FacturationSession, note: Optional[str] = None) -> discord.Embed:
     embed = discord.Embed(title="🧾 Facturation EMS", color=discord.Color.green())
-    embed.add_field(name="Patient", value=session.patient_name, inline=False)
+    embed.add_field(name="Patient", value=f"{session.patient_prenom} {session.patient_nom}", inline=False)
     if session.details:
         embed.add_field(name="Soins ajoutés", value="\n".join(f"• {d}" for d in session.details), inline=False)
         embed.add_field(name="Total provisoire", value=f"**{session.total} $**", inline=False)
@@ -1057,7 +1120,8 @@ class FacturationSummaryView(SafeView):
     async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
         detail_text = "\n".join(f"• {d}" for d in self.session.details) or "Aucun soin sélectionné"
         record_id = await save_dossier_intervention(
-            patient_name=self.session.patient_name,
+            patient_prenom=self.session.patient_prenom,
+            patient_nom=self.session.patient_nom,
             blessure="Facturation soins",
             soins=detail_text,
             transport="",
@@ -1067,13 +1131,14 @@ class FacturationSummaryView(SafeView):
             created_by_name=interaction.user.display_name,
         )
         embed = discord.Embed(title="🧾 Facturation finale", color=discord.Color.gold())
-        embed.add_field(name="Patient", value=self.session.patient_name, inline=False)
+        embed.add_field(name="Patient", value=f"{self.session.patient_prenom} {self.session.patient_nom}", inline=False)
         embed.add_field(name="Soins effectués", value=detail_text, inline=False)
         embed.add_field(name="Total", value=f"**{self.session.total} $**", inline=False)
         embed.add_field(name="Statut de paiement", value="⏳ **En attente**", inline=False)
         embed.set_footer(text=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}")
         final_view = FacturationFinalView(
-            patient_name=self.session.patient_name,
+            patient_prenom=self.session.patient_prenom,
+            patient_nom=self.session.patient_nom,
             details=self.session.details,
             total=self.session.total,
             record_id=record_id,
@@ -1082,35 +1147,47 @@ class FacturationSummaryView(SafeView):
         await interaction.response.edit_message(embed=embed, view=final_view)
 
 @bot.tree.command(name="facturation", description="Noter les soins effectués et calculer le prix total")
-@app_commands.describe(patient="Nom du patient")
-async def facturation(interaction: discord.Interaction, patient: str):
+@app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
+async def facturation(interaction: discord.Interaction, prenom: str, nom: str):
     session = FacturationSession()
-    session.patient_name = patient
-    dossier = await get_dossier_personnel(patient)
+    session.patient_prenom = prenom
+    session.patient_nom = nom
+    dossier = await get_dossier_personnel(prenom, nom)
     if dossier:
-        session.patient_name = dossier["nom"]
+        session.patient_prenom = dossier["prenom"]
+        session.patient_nom = dossier["nom"]
     embed = build_facturation_embed(session, note="Choisis une catégorie de soins pour commencer.")
     await interaction.response.send_message(embed=embed, view=FacturationCategoryView(session))
 
 # ---------- COMMANDES ----------
 
 # GESTION DES PATIENTS
-@bot.tree.command(name="patient_creer", description="Créer un nouveau patient (nom complet)")
-@app_commands.describe(nom="Nom complet du patient")
-async def patient_creer(interaction: discord.Interaction, nom: str):
-    existant = await get_dossier_personnel(nom)
+@bot.tree.command(name="patient_creer", description="Créer un nouveau patient (prénom et nom)")
+@app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
+async def patient_creer(interaction: discord.Interaction, prenom: str, nom: str):
+    existant = await get_dossier_personnel(prenom, nom)
     if existant:
-        await interaction.response.send_message(f"❌ Un patient nommé **{nom}** existe déjà.", ephemeral=True)
+        await interaction.response.send_message(
+            f"❌ Un patient nommé **{prenom} {nom}** existe déjà.",
+            ephemeral=True
+        )
         return
+
     await save_dossier_personnel(
+        prenom=prenom,
         nom=nom,
         age="",
-        groupe_sanguin="",  # sera rempli par analyse
+        groupe_sanguin="",
         allergies="",
         contact_urgence=f"Créé par {interaction.user.display_name} le {datetime.now(timezone.utc).strftime('%d/%m/%Y')}",
         created_by=interaction.user.id,
     )
-    embed = discord.Embed(title="✅ Patient créé", description=f"**{nom}** a été ajouté.", color=discord.Color.green())
+
+    embed = discord.Embed(
+        title="✅ Patient créé",
+        description=f"**{prenom} {nom}** a été ajouté.",
+        color=discord.Color.green()
+    )
     embed.add_field(
         name="📋 Prochaines étapes",
         value="• `/nouveau_dossier` pour compléter le dossier\n"
@@ -1122,48 +1199,75 @@ async def patient_creer(interaction: discord.Interaction, nom: str):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="patient_supprimer", description="Supprimer un patient (irréversible)")
-@app_commands.describe(nom="Nom du patient")
-async def patient_supprimer(interaction: discord.Interaction, nom: str):
-    dossier = await get_dossier_personnel(nom)
+@app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
+async def patient_supprimer(interaction: discord.Interaction, prenom: str, nom: str):
+    dossier = await get_dossier_personnel(prenom, nom)
     if not dossier:
-        await interaction.response.send_message(f"❌ Aucun patient nommé **{nom}** trouvé.", ephemeral=True)
+        await interaction.response.send_message(
+            f"❌ Aucun patient nommé **{prenom} {nom}** trouvé.",
+            ephemeral=True
+        )
         return
-    embed = discord.Embed(title="⚠️ Confirmation", description=f"Supprimer **{nom}** ?", color=discord.Color.red())
+    embed = discord.Embed(
+        title="⚠️ Confirmation",
+        description=f"Supprimer **{prenom} {nom}** ?",
+        color=discord.Color.red()
+    )
     embed.set_footer(text="Action irréversible")
-    view = ConfirmDeleteView(nom)
+    view = ConfirmDeleteView(prenom, nom)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 class ConfirmDeleteView(discord.ui.View):
-    def __init__(self, nom: str):
+    def __init__(self, prenom: str, nom: str):
         super().__init__(timeout=60)
+        self.prenom = prenom
         self.nom = nom
     @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        success = await delete_dossier_personnel(self.nom)
+        success = await delete_dossier_personnel(self.prenom, self.nom)
         if success:
-            embed = discord.Embed(title="✅ Patient supprimé", description=f"**{self.nom}** supprimé.", color=discord.Color.green())
+            embed = discord.Embed(title="✅ Patient supprimé", description=f"**{self.prenom} {self.nom}** supprimé.", color=discord.Color.green())
             await interaction.response.edit_message(embed=embed, view=None)
         else:
-            embed = discord.Embed(title="❌ Erreur", description=f"Erreur lors de la suppression.", color=discord.Color.red())
+            embed = discord.Embed(title="❌ Erreur", description="Erreur lors de la suppression.", color=discord.Color.red())
             await interaction.response.edit_message(embed=embed, view=None)
     @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(title="❌ Annulé", description=f"**{self.nom}** n'a pas été supprimé.", color=discord.Color.blue())
+        embed = discord.Embed(title="❌ Annulé", description=f"**{self.prenom} {self.nom}** n'a pas été supprimé.", color=discord.Color.blue())
         await interaction.response.edit_message(embed=embed, view=None)
 
 @bot.tree.command(name="patient_modifier_nom", description="Modifier le nom d'un patient")
-@app_commands.describe(ancien_nom="Nom actuel", nouveau_nom="Nouveau nom")
-async def patient_modifier_nom(interaction: discord.Interaction, ancien_nom: str, nouveau_nom: str):
-    dossier = await get_dossier_personnel(ancien_nom)
+@app_commands.describe(
+    ancien_prenom="Prénom actuel",
+    ancien_nom="Nom actuel",
+    nouveau_prenom="Nouveau prénom",
+    nouveau_nom="Nouveau nom"
+)
+async def patient_modifier_nom(
+    interaction: discord.Interaction,
+    ancien_prenom: str,
+    ancien_nom: str,
+    nouveau_prenom: str,
+    nouveau_nom: str
+):
+    dossier = await get_dossier_personnel(ancien_prenom, ancien_nom)
     if not dossier:
-        await interaction.response.send_message(f"❌ Aucun patient nommé **{ancien_nom}** trouvé.", ephemeral=True)
+        await interaction.response.send_message(
+            f"❌ Aucun patient nommé **{ancien_prenom} {ancien_nom}** trouvé.",
+            ephemeral=True
+        )
         return
-    existant = await get_dossier_personnel(nouveau_nom)
+    existant = await get_dossier_personnel(nouveau_prenom, nouveau_nom)
     if existant:
-        await interaction.response.send_message(f"❌ Un patient nommé **{nouveau_nom}** existe déjà.", ephemeral=True)
+        await interaction.response.send_message(
+            f"❌ Un patient nommé **{nouveau_prenom} {nouveau_nom}** existe déjà.",
+            ephemeral=True
+        )
         return
-    await delete_dossier_personnel(ancien_nom)
+
+    await delete_dossier_personnel(ancien_prenom, ancien_nom)
     await save_dossier_personnel(
+        prenom=nouveau_prenom,
         nom=nouveau_nom,
         age=dossier["age"],
         groupe_sanguin=dossier["groupe_sanguin"],
@@ -1171,16 +1275,13 @@ async def patient_modifier_nom(interaction: discord.Interaction, ancien_nom: str
         contact_urgence=dossier["contact_urgence"],
         created_by=interaction.user.id,
     )
-    embed = discord.Embed(title="✅ Patient renommé", description=f"**{ancien_nom}** → **{nouveau_nom}**", color=discord.Color.green())
-    await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@patient_modifier_nom.autocomplete("ancien_nom")
-async def patient_modifier_nom_autocomplete(interaction: discord.Interaction, current: str):
-    if not current:
-        dossiers = await list_all_personnel(25)
-        return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
-    resultats = await search_dossiers_personnel(current, 25)
-    return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
+    embed = discord.Embed(
+        title="✅ Patient renommé",
+        description=f"**{ancien_prenom} {ancien_nom}** → **{nouveau_prenom} {nouveau_nom}**",
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="patient_liste", description="Lister tous les patients")
 @app_commands.describe(limite="Nombre max (défaut:50)")
@@ -1195,7 +1296,7 @@ async def patient_liste(interaction: discord.Interaction, limite: Optional[int] 
         lettre = d["nom"][0].upper()
         if lettre not in patients_par_lettre:
             patients_par_lettre[lettre] = []
-        patients_par_lettre[lettre].append(d["nom"])
+        patients_par_lettre[lettre].append(f"{d['prenom']} {d['nom']}")
     for lettre in sorted(patients_par_lettre.keys()):
         noms = "\n".join(f"• {nom}" for nom in sorted(patients_par_lettre[lettre])[:15])
         if len(patients_par_lettre[lettre]) > 15:
@@ -1213,55 +1314,47 @@ async def dossier_medical_modifier(interaction: discord.Interaction):
     await interaction.response.send_modal(DossierMedicalModifierModal())
 
 @bot.tree.command(name="rapport_ems", description="Créer un rapport d'intervention EMS")
-@app_commands.describe(patient="Nom du patient (optionnel)")
-async def dossier_intervention(interaction: discord.Interaction, patient: Optional[str] = None):
-    await interaction.response.send_modal(RapportInterventionModal(patient_name=patient))
+@app_commands.describe(prenom="Prénom du patient (optionnel)", nom="Nom du patient (optionnel)")
+async def dossier_intervention(interaction: discord.Interaction, prenom: Optional[str] = None, nom: Optional[str] = None):
+    await interaction.response.send_modal(RapportInterventionModal(patient_prenom=prenom, patient_nom=nom))
 
-@bot.tree.command(name="dossier_voir", description="Consulter un dossier personnel (éphémère)")
-@app_commands.describe(nom="Nom du personnage")
-async def dossier_voir(interaction: discord.Interaction, nom: str):
-    dossier = await get_dossier_personnel(nom)
+@bot.tree.command(name="dossier_voir", description="Consulter un dossier (éphémère)")
+@app_commands.describe(identifiant="Prénom et nom ou recherche")
+async def dossier_voir(interaction: discord.Interaction, identifiant: str):
+    dossier = await get_dossier_complet(identifiant)
     if not dossier:
-        resultats = await search_dossiers_personnel(nom)
-        if len(resultats) > 1:
-            noms = ", ".join(r["nom"] for r in resultats[:10])
-            await interaction.response.send_message(f"Plusieurs dossiers : {noms}. Précisez le nom.", ephemeral=True)
-            return
-        elif len(resultats) == 1:
-            dossier = resultats[0]
-        else:
-            await interaction.response.send_message(f"Aucun dossier trouvé pour '{nom}'.", ephemeral=True)
-            return
-    embed = discord.Embed(title=f"📋 Dossier — {dossier['nom']}", color=discord.Color.blue())
+        await interaction.response.send_message(
+            f"Aucun dossier trouvé pour '{identifiant}'. Utilisez /patient_liste.",
+            ephemeral=True
+        )
+        return
+
+    embed = discord.Embed(title=f"📋 Dossier — {dossier['prenom']} {dossier['nom']}", color=discord.Color.blue())
     embed.add_field(name="Âge", value=dossier["age"] or "N/A", inline=True)
     embed.add_field(name="Groupe sanguin", value=dossier["groupe_sanguin"] or "❌ Non déterminé", inline=True)
     embed.add_field(name="Allergies / Antécédents", value=dossier["allergies"] or "Aucun", inline=False)
     embed.add_field(name="Contact d'urgence", value=dossier["contact_urgence"] or "Non renseigné", inline=False)
-    interventions = await get_interventions_for_patient(dossier["nom"])
+
+    interventions = await get_interventions_for_patient(dossier["prenom"], dossier["nom"])
     if interventions:
         historique = "\n".join(f"**#{i['id']}** — {i['blessure']} ({i['created_at'][:10]})" for i in interventions)
         embed.add_field(name="Historique (5 dernières)", value=historique, inline=False)
     embed.set_footer(text="Ce message disparaîtra. Utilisez /dossier_afficher pour un affichage permanent.")
-    await interaction.response.send_message(embed=embed, ephemeral=True)  # ← éphémère
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="dossier_afficher", description="Afficher le dossier complet d'un patient (permanent)")
-@app_commands.describe(nom="Nom complet du patient")
-async def dossier_afficher(interaction: discord.Interaction, nom: str):
-    dossier = await get_dossier_personnel(nom)
+@app_commands.describe(identifiant="Prénom et nom ou recherche")
+async def dossier_afficher(interaction: discord.Interaction, identifiant: str):
+    dossier = await get_dossier_complet(identifiant)
     if not dossier:
-        resultats = await search_dossiers_personnel(nom)
-        if len(resultats) > 1:
-            noms = ", ".join(r["nom"] for r in resultats[:10])
-            await interaction.response.send_message(f"Plusieurs dossiers : {noms}. Précisez le nom.", ephemeral=True)
-            return
-        elif len(resultats) == 1:
-            dossier = resultats[0]
-        else:
-            await interaction.response.send_message(f"Aucun dossier trouvé pour '{nom}'.", ephemeral=True)
-            return
+        await interaction.response.send_message(
+            f"Aucun dossier trouvé pour '{identifiant}'. Utilisez /patient_liste.",
+            ephemeral=True
+        )
+        return
 
     embed = discord.Embed(
-        title=f"📋 Dossier Médical — {dossier['nom']}",
+        title=f"📋 Dossier Médical — {dossier['prenom']} {dossier['nom']}",
         color=discord.Color.blue()
     )
     embed.add_field(name="Âge", value=dossier["age"] or "Non renseigné", inline=True)
@@ -1282,23 +1375,16 @@ async def dossier_afficher(interaction: discord.Interaction, nom: str):
     )
     embed.set_footer(text=f"Dossier créé le {dossier['created_at'][:10]} • Mis à jour le {dossier['updated_at'][:10]}")
 
-    await interaction.response.send_message(embed=embed, ephemeral=False)  # ← permanent
+    await interaction.response.send_message(embed=embed, ephemeral=False)  # Permanent
 
-@dossier_voir.autocomplete("nom")
-async def dossier_voir_nom_autocomplete(interaction: discord.Interaction, current: str):
+@dossier_voir.autocomplete("identifiant")
+@dossier_afficher.autocomplete("identifiant")
+async def dossier_identifiant_autocomplete(interaction: discord.Interaction, current: str):
     if not current:
         dossiers = await list_all_personnel(25)
-        return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
+        return [app_commands.Choice(name=f"{d['prenom']} {d['nom']}", value=f"{d['prenom']} {d['nom']}") for d in dossiers[:25]]
     resultats = await search_dossiers_personnel(current, 25)
-    return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
-
-@dossier_afficher.autocomplete("nom")
-async def dossier_afficher_nom_autocomplete(interaction: discord.Interaction, current: str):
-    if not current:
-        dossiers = await list_all_personnel(25)
-        return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
-    resultats = await search_dossiers_personnel(current, 25)
-    return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
+    return [app_commands.Choice(name=f"{r['prenom']} {r['nom']}", value=f"{r['prenom']} {r['nom']}") for r in resultats[:25]]
 
 @bot.tree.command(name="dossier_liste", description="Lister les dernières interventions")
 async def dossier_liste(interaction: discord.Interaction):
@@ -1308,7 +1394,11 @@ async def dossier_liste(interaction: discord.Interaction):
         return
     embed = discord.Embed(title="🚑 Dernières interventions", color=discord.Color.orange())
     for i in interventions:
-        embed.add_field(name=f"#{i['id']} — {i['patient_name']}", value=f"{i['blessure']}\nPar {i['created_by_name']} le {i['created_at'][:10]}", inline=False)
+        embed.add_field(
+            name=f"#{i['id']} — {i['patient_prenom']} {i['patient_nom']}",
+            value=f"{i['blessure']}\nPar {i['created_by_name']} le {i['created_at'][:10]}",
+            inline=False
+        )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="dossier_supprimer_intervention", description="Supprimer une intervention")
@@ -1321,21 +1411,13 @@ async def dossier_supprimer_intervention(interaction: discord.Interaction, id: i
         await interaction.response.send_message(f"Aucune intervention n°{id} trouvée.", ephemeral=True)
 
 @bot.tree.command(name="dossier_supprimer_personnel", description="Supprimer un dossier personnel")
-@app_commands.describe(nom="Nom du personnage")
-async def dossier_supprimer_personnel(interaction: discord.Interaction, nom: str):
-    success = await delete_dossier_personnel(nom)
+@app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
+async def dossier_supprimer_personnel(interaction: discord.Interaction, prenom: str, nom: str):
+    success = await delete_dossier_personnel(prenom, nom)
     if success:
-        await interaction.response.send_message(f"Dossier de {nom} supprimé.", ephemeral=True)
+        await interaction.response.send_message(f"Dossier de {prenom} {nom} supprimé.", ephemeral=True)
     else:
-        await interaction.response.send_message(f"Aucun dossier trouvé pour {nom}.", ephemeral=True)
-
-@dossier_supprimer_personnel.autocomplete("nom")
-async def dossier_supprimer_nom_autocomplete(interaction: discord.Interaction, current: str):
-    if not current:
-        dossiers = await list_all_personnel(25)
-        return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
-    resultats = await search_dossiers_personnel(current, 25)
-    return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
+        await interaction.response.send_message(f"Aucun dossier trouvé pour {prenom} {nom}.", ephemeral=True)
 
 # ---------- ANALYSE GROUPE SANGUIN ----------
 GROUPE_SANGUIN_RESULTATS = [
@@ -1364,24 +1446,39 @@ COMPATIBILITE_GROUPE = {
     name="analyse_groupe_sanguin",
     description="Effectuer une analyse de groupe sanguin (résultat définitif)"
 )
-@app_commands.describe(nom="Nom du patient", prenom="Prénom du patient")
-async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, prenom: str):
-    nom_complet = f"{prenom} {nom}"
+@app_commands.describe(
+    prenom="Prénom du patient",
+    nom="Nom de famille du patient"
+)
+async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, nom: str):
+    """Effectue une analyse de groupe sanguin et affiche le dossier complet mis à jour."""
     
     # Vérifier l'existence du dossier
-    dossier = await get_dossier_personnel(nom_complet)
+    dossier = await get_dossier_personnel(prenom, nom)
     if not dossier:
-        await interaction.response.send_message(
-            f"❌ Aucun dossier trouvé pour **{nom_complet}**.\n"
-            f"Veuillez d'abord créer un dossier avec `/patient_creer` ou `/nouveau_dossier`.",
-            ephemeral=True
-        )
-        return
+        # Recherche floue pour proposer des alternatives
+        resultats = await search_dossiers_personnel(f"{prenom} {nom}", 3)
+        if resultats:
+            suggestions = "\n".join(f"• {r['prenom']} {r['nom']}" for r in resultats[:3])
+            await interaction.response.send_message(
+                f"❌ Aucun dossier trouvé pour **{prenom} {nom}**.\n"
+                f"Voulez-vous dire :\n{suggestions}\n"
+                f"Utilisez `/analyse_groupe_sanguin` avec le bon nom.",
+                ephemeral=True
+            )
+            return
+        else:
+            await interaction.response.send_message(
+                f"❌ Aucun dossier trouvé pour **{prenom} {nom}**.\n"
+                f"Veuillez créer un dossier avec `/patient_creer` ou `/nouveau_dossier`.",
+                ephemeral=True
+            )
+            return
 
-    # Effet de chargement
+    # === PHASE DE CHARGEMENT (message permanent) ===
     embed_chargement = discord.Embed(
         title="🧪 Analyse du Groupe Sanguin",
-        description=f"**Patient :** {nom_complet}",
+        description=f"**Patient :** {prenom} {nom}",
         color=discord.Color.blue()
     )
     embed_chargement.add_field(
@@ -1390,8 +1487,9 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, pre
         inline=False
     )
     embed_chargement.set_footer(text="⏳ Veuillez patienter...")
-    await interaction.response.send_message(embed=embed_chargement, ephemeral=True)
+    await interaction.response.send_message(embed=embed_chargement, ephemeral=False)  # Permanent
 
+    # Simulation des étapes
     etapes = [
         "🩸 Prélèvement sanguin effectué",
         "🔬 Préparation de l'échantillon",
@@ -1407,7 +1505,7 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, pre
         barre = "█" * (i + 1) + "░" * (len(etapes) - i - 1)
         embed_chargement = discord.Embed(
             title="🧪 Analyse du Groupe Sanguin",
-            description=f"**Patient :** {nom_complet}",
+            description=f"**Patient :** {prenom} {nom}",
             color=discord.Color.blue()
         )
         embed_chargement.add_field(
@@ -1418,16 +1516,17 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, pre
         embed_chargement.set_footer(text="⏳ Analyse en cours...")
         await interaction.edit_original_response(embed=embed_chargement)
 
-    # Résultat aléatoire
+    # === RÉSULTAT ALÉATOIRE ===
     resultat = random.choice(GROUPE_SANGUIN_RESULTATS)
     groupe = resultat["groupe"]
     compat = COMPATIBILITE_GROUPE.get(groupe, {})
     donneur_pour = ", ".join(compat.get("donneur_pour", []))
     receveur_de = ", ".join(compat.get("receveur_de", []))
 
-    # Mise à jour du dossier
+    # === MISE À JOUR DU DOSSIER ===
     await save_dossier_personnel(
-        nom=nom_complet,
+        prenom=prenom,
+        nom=nom,
         age=dossier["age"] or "",
         groupe_sanguin=groupe,
         allergies=dossier["allergies"] or "",
@@ -1435,35 +1534,42 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, nom: str, pre
         created_by=interaction.user.id,
     )
 
-    # Embed final
-    embed_resultat = discord.Embed(
-        title="🧪 Résultat de l'Analyse Sanguine",
-        description=f"**Patient :** {nom_complet}",
+    # === RÉCUPÉRER LE DOSSIER MIS À JOUR ===
+    dossier_updated = await get_dossier_personnel(prenom, nom)
+
+    # === AFFICHER LE DOSSIER COMPLET (définitif) ===
+    embed_final = discord.Embed(
+        title=f"🩺 Dossier Médical — {dossier_updated['prenom']} {dossier_updated['nom']}",
         color=discord.Color.green()
     )
-    embed_resultat.add_field(
-        name="🩸 Groupe Sanguin",
-        value=f"```\n     {resultat['groupe']}\n```\n**Rhésus :** {resultat['rh']}",
-        inline=True
-    )
-    embed_resultat.add_field(
-        name="📊 Fréquence",
-        value=f"{resultat['frequence']}\n\n*{resultat['description']}*",
-        inline=True
-    )
-    embed_resultat.add_field(
-        name="💉 Compatibilités",
-        value=f"**🩸 Peut donner à :** {donneur_pour}\n**🩸 Peut recevoir de :** {receveur_de}",
+    embed_final.add_field(name="Âge", value=dossier_updated["age"] or "Non renseigné", inline=True)
+    embed_final.add_field(name="Groupe sanguin", value=dossier_updated["groupe_sanguin"] or "❌ Non déterminé", inline=True)
+    embed_final.add_field(
+        name="Allergies / Antécédents",
+        value=dossier_updated["allergies"] or "Aucun",
         inline=False
     )
-    embed_resultat.add_field(
-        name="🔒 Résultat définitif",
-        value="Ce groupe sanguin est officiellement enregistré dans le dossier du patient.\nAucune modification ultérieure ne sera possible sans nouvelle analyse.",
+    embed_final.add_field(
+        name="Contact d'urgence",
+        value=dossier_updated["contact_urgence"] or "Non renseigné",
         inline=False
     )
-    embed_resultat.set_footer(text=f"Analyse enregistrée le {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
 
-    await interaction.edit_original_response(embed=embed_resultat)
+    # Ajouter l'historique des interventions (5 dernières)
+    interventions = await get_interventions_for_patient(prenom, nom, 5)
+    if interventions:
+        historique = "\n".join(
+            f"**#{i['id']}** — {i['blessure']} ({i['created_at'][:10]})"
+            for i in interventions
+        )
+        embed_final.add_field(name="📋 Historique des interventions (5 dernières)", value=historique, inline=False)
+
+    embed_final.set_footer(
+        text=f"✅ Analyse effectuée le {datetime.now().strftime('%d/%m/%Y à %H:%M')} • Dossier mis à jour"
+    )
+
+    # === ÉDITER LE MESSAGE DE CHARGEMENT POUR AFFICHER LE DOSSIER COMPLET ===
+    await interaction.edit_original_response(embed=embed_final, view=None)
 
 # ---------- TRIAGE ----------
 TRIAGE_DATA = {
@@ -1644,24 +1750,41 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 # ---------- DÉMARRAGE ----------
+GUILD_IDS = [1531443088151543858, 1416761561749651556]  # Remplace par tes IDs
+
 @bot.event
 async def on_ready():
     await init_db()
+    logger.info(f"✅ Connecté en tant que {bot.user} (ID: {bot.user.id})")
     print(f"✅ Connecté en tant que {bot.user}")
-    print(f"📋 Le bot est sur {len(bot.guilds)} serveur(s)")
 
-    # Synchronisation GLOBALE (toutes les guildes)
-    await bot.tree.sync()
-    print("✅ Commandes globales synchronisées")
+    # Supprimer les commandes globales pour éviter les doublons
+    bot.tree.clear_commands(guild=None)
+    await bot.tree.sync(guild=None)
+    print("✅ Commandes globales supprimées")
 
-    # Afficher le nombre de commandes
-    commands = await bot.tree.fetch_commands()
-    print(f"📋 {len(commands)} commandes disponibles globalement")
+    # Synchroniser uniquement sur les guildes spécifiées
+    for guild_id in GUILD_IDS:
+        try:
+            guild = bot.get_guild(guild_id)
+            if guild:
+                bot.tree.copy_global_to(guild=guild)
+                await bot.tree.sync(guild=guild)
+                logger.info(f"✅ Commandes synchronisées sur : {guild.name}")
+                print(f"✅ Commandes synchronisées sur : {guild.name}")
+            else:
+                logger.warning(f"⚠️ Serveur {guild_id} non trouvé")
+                print(f"⚠️ Serveur {guild_id} non trouvé")
+        except Exception as e:
+            logger.error(f"❌ Erreur sur {guild_id} : {e}")
+            print(f"❌ Erreur sur {guild_id} : {e}")
 
     print("🚀 Bot prêt !")
+    logger.info("✅ Démarrage terminé.")
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("❌ ERREUR : DISCORD_TOKEN non défini")
+        print("❌ ERREUR : DISCORD_TOKEN non défini !")
+        logger.error("DISCORD_TOKEN non défini")
     else:
         bot.run(TOKEN)
