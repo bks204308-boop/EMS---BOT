@@ -22,6 +22,12 @@ logging.basicConfig(level=logging.INFO)
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+# Ajoutez ces lignes après vos imports
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="discord.client")
+
+import logging
+logging.getLogger("discord.client").setLevel(logging.ERROR)
 
 # ---------- BASE DE DONNÉES ----------
 async def init_db():
