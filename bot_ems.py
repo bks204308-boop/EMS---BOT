@@ -1644,7 +1644,7 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 # ---------- DÉMARRAGE ----------
-GUILD_IDS = [1531443088151543858, 1416761561749651556]  # Remplace par tes IDs
+GUILD_IDS = [1531443088151543858, 1416761561749651556]
 
 @bot.event
 async def on_ready():
