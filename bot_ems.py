@@ -1566,6 +1566,294 @@ async def facturation(interaction: discord.Interaction, patient: str):
     )
 
 # ---------- COMMANDES SLASH ----------
+
+# ---------- GESTION DES PATIENTS ----------
+
+@bot.tree.command(
+    name="patient_creer",
+    description="Créer un nouveau patient (nom et prénom uniquement)"
+)
+@app_commands.describe(nom="Nom complet du patient")
+async def patient_creer(interaction: discord.Interaction, nom: str):
+    """Crée un nouveau patient avec uniquement son nom"""
+    
+    # Vérifier si le patient existe déjà
+    existant = await get_dossier_personnel(nom)
+    if existant:
+        await interaction.response.send_message(
+            f"❌ Un patient nommé **{nom}** existe déjà.\n"
+            f"Utilise `/dossier_voir` pour le consulter ou `/modif_dossier` pour le modifier.",
+            ephemeral=True
+        )
+        return
+    
+    # Créer le dossier avec les champs vides
+    await save_dossier_personnel(
+        nom=nom,
+        age="",
+        groupe_sanguin="",
+        allergies="",
+        contact_urgence=f"Créé par {interaction.user.display_name} le {datetime.now(timezone.utc).strftime('%d/%m/%Y')}",
+        created_by=interaction.user.id,
+    )
+    
+    embed = discord.Embed(
+        title="✅ Patient créé avec succès",
+        description=f"**{nom}** a été ajouté à la base de données.",
+        color=discord.Color.green()
+    )
+    embed.add_field(
+        name="📋 Prochaines étapes",
+        value="• `/nouveau_dossier` pour compléter le dossier médical\n"
+              "• `/modif_dossier` pour modifier les informations\n"
+              "• `/rapport_ems` pour créer une intervention",
+        inline=False
+    )
+    embed.set_footer(text=f"Créé par {interaction.user.display_name}")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(
+    name="patient_supprimer",
+    description="Supprimer définitivement un patient de la base de données"
+)
+@app_commands.describe(nom="Nom du patient à supprimer")
+async def patient_supprimer(interaction: discord.Interaction, nom: str):
+    """Supprime un patient et toutes ses données"""
+    
+    # Vérifier si le patient existe
+    dossier = await get_dossier_personnel(nom)
+    if not dossier:
+        # Rechercher des correspondances proches
+        resultats = await search_dossiers_personnel(nom)
+        if len(resultats) > 1:
+            noms = ", ".join(r["nom"] for r in resultats[:10])
+            await interaction.response.send_message(
+                f"❌ Plusieurs patients correspondent : {noms}.\n"
+                f"Précisez le nom exact.",
+                ephemeral=True
+            )
+            return
+        elif len(resultats) == 1:
+            # Proposer le nom trouvé
+            await interaction.response.send_message(
+                f"❌ Aucun patient nommé **{nom}** n'a été trouvé.\n"
+                f"Vouliez-vous dire **{resultats[0]['nom']}** ?\n"
+                f"Utilisez : `/patient_supprimer nom:\"{resultats[0]['nom']}\"`",
+                ephemeral=True
+            )
+            return
+        else:
+            await interaction.response.send_message(
+                f"❌ Aucun patient nommé **{nom}** trouvé.",
+                ephemeral=True
+            )
+            return
+    
+    # Créer un embed de confirmation
+    embed = discord.Embed(
+        title="⚠️ Confirmation de suppression",
+        description=f"Êtes-vous sûr de vouloir supprimer **{nom}** ?",
+        color=discord.Color.red()
+    )
+    
+    # Récupérer les interventions associées
+    interventions = await get_interventions_for_patient(nom)
+    if interventions:
+        embed.add_field(
+            name="📋 Données associées",
+            value=f"• {len(interventions)} intervention(s) enregistrée(s)\n"
+                  f"⚠️ Toutes ces données seront **définitivement supprimées**.",
+            inline=False
+        )
+    
+    embed.set_footer(text="Cette action est irréversible")
+    
+    # Créer une vue avec boutons de confirmation
+    view = ConfirmDeleteView(nom)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+class ConfirmDeleteView(discord.ui.View):
+    """Vue de confirmation pour la suppression d'un patient"""
+    
+    def __init__(self, nom: str):
+        super().__init__(timeout=60)
+        self.nom = nom
+        self.confirmed = False
+    
+    @discord.ui.button(label="✅ Confirmer la suppression", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.confirmed:
+            await interaction.response.send_message("⚠️ Ce patient a déjà été supprimé.", ephemeral=True)
+            return
+        
+        # Supprimer le dossier personnel
+        success_personnel = await delete_dossier_personnel(self.nom)
+        
+        # Supprimer les interventions associées (optionnel)
+        # Note: Vous pouvez ajouter une fonction pour supprimer toutes les interventions d'un patient
+        # Pour l'instant, on les garde avec le nom du patient
+        # success_interventions = await delete_all_interventions_for_patient(self.nom)
+        
+        if success_personnel:
+            embed = discord.Embed(
+                title="✅ Patient supprimé",
+                description=f"**{self.nom}** a été définitivement supprimé de la base de données.",
+                color=discord.Color.green()
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+            self.confirmed = True
+        else:
+            embed = discord.Embed(
+                title="❌ Erreur",
+                description=f"Une erreur est survenue lors de la suppression de **{self.nom}**.",
+                color=discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="❌ Suppression annulée",
+            description=f"Le patient **{self.nom}** n'a pas été supprimé.",
+            color=discord.Color.blue()
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+
+@bot.tree.command(
+    name="patient_modifier_nom",
+    description="Modifier le nom d'un patient"
+)
+@app_commands.describe(
+    ancien_nom="Nom actuel du patient",
+    nouveau_nom="Nouveau nom du patient"
+)
+async def patient_modifier_nom(interaction: discord.Interaction, ancien_nom: str, nouveau_nom: str):
+    """Modifie le nom d'un patient existant"""
+    
+    # Vérifier si le patient existe
+    dossier = await get_dossier_personnel(ancien_nom)
+    if not dossier:
+        await interaction.response.send_message(
+            f"❌ Aucun patient nommé **{ancien_nom}** trouvé.",
+            ephemeral=True
+        )
+        return
+    
+    # Vérifier si le nouveau nom existe déjà
+    existant = await get_dossier_personnel(nouveau_nom)
+    if existant:
+        await interaction.response.send_message(
+            f"❌ Un patient nommé **{nouveau_nom}** existe déjà.\n"
+            f"Utilisez un autre nom.",
+            ephemeral=True
+        )
+        return
+    
+    # Supprimer l'ancien dossier
+    await delete_dossier_personnel(ancien_nom)
+    
+    # Créer un nouveau dossier avec le nouveau nom et les mêmes données
+    await save_dossier_personnel(
+        nom=nouveau_nom,
+        age=dossier["age"],
+        groupe_sanguin=dossier["groupe_sanguin"],
+        allergies=dossier["allergies"],
+        contact_urgence=dossier["contact_urgence"],
+        created_by=interaction.user.id,
+    )
+    
+    embed = discord.Embed(
+        title="✅ Patient renommé",
+        description=f"**{ancien_nom}** → **{nouveau_nom}**",
+        color=discord.Color.green()
+    )
+    embed.add_field(
+        name="📋 Données conservées",
+        value=f"Âge: {dossier['age'] or 'Non renseigné'}\n"
+              f"Groupe sanguin: {dossier['groupe_sanguin'] or 'Non renseigné'}\n"
+              f"Allergies: {dossier['allergies'] or 'Aucune'}",
+        inline=False
+    )
+    embed.set_footer(text=f"Modifié par {interaction.user.display_name}")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@patient_modifier_nom.autocomplete("ancien_nom")
+async def patient_modifier_nom_autocomplete(interaction: discord.Interaction, current: str):
+    """Autocomplete pour le nom du patient"""
+    if not current:
+        dossiers = await list_all_personnel(25)
+        return [app_commands.Choice(name=d["nom"], value=d["nom"]) for d in dossiers[:25]]
+    resultats = await search_dossiers_personnel(current, 25)
+    return [app_commands.Choice(name=r["nom"], value=r["nom"]) for r in resultats[:25]]
+
+
+@bot.tree.command(
+    name="patient_liste",
+    description="Lister tous les patients enregistrés"
+)
+@app_commands.describe(limite="Nombre maximum de patients à afficher (défaut: 50)")
+async def patient_liste(interaction: discord.Interaction, limite: Optional[int] = 50):
+    """Affiche la liste de tous les patients"""
+    
+    dossiers = await list_all_personnel(limite)
+    
+    if not dossiers:
+        await interaction.response.send_message(
+            "📋 Aucun patient enregistré pour le moment.\n"
+            "Utilise `/patient_creer` pour en ajouter un.",
+            ephemeral=True
+        )
+        return
+    
+    embed = discord.Embed(
+        title=f"📋 Liste des patients ({len(dossiers)})",
+        color=discord.Color.blue()
+    )
+    
+    # Grouper par premières lettres
+    patients_par_lettre = {}
+    for d in dossiers:
+        lettre = d["nom"][0].upper()
+        if lettre not in patients_par_lettre:
+            patients_par_lettre[lettre] = []
+        patients_par_lettre[lettre].append(d["nom"])
+    
+    # Ajouter les patients par ordre alphabétique
+    for lettre in sorted(patients_par_lettre.keys()):
+        noms = "\n".join(f"• {nom}" for nom in sorted(patients_par_lettre[lettre])[:15])
+        if len(patients_par_lettre[lettre]) > 15:
+            noms += f"\n*... et {len(patients_par_lettre[lettre]) - 15} autre(s)*"
+        embed.add_field(
+            name=f"**{lettre}** ({len(patients_par_lettre[lettre])})",
+            value=noms,
+            inline=True
+        )
+    
+    embed.set_footer(text=f"Total: {len(dossiers)} patients • Affichage limité à {limite}")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@patient_liste.autocomplete("limite")
+async def patient_liste_limite_autocomplete(interaction: discord.Interaction, current: str):
+    """Autocomplete pour la limite d'affichage"""
+    options = [
+        app_commands.Choice(name="10 patients", value="10"),
+        app_commands.Choice(name="25 patients", value="25"),
+        app_commands.Choice(name="50 patients", value="50"),
+        app_commands.Choice(name="100 patients", value="100"),
+        app_commands.Choice(name="Tous les patients", value="999")
+    ]
+    if current:
+        return [opt for opt in options if current in opt.name]
+    return options
+    
 @bot.tree.command(
     name="nouveau_dossier",
     description="Créer un dossier médical complet (visite standard)",
