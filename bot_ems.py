@@ -36,41 +36,56 @@ async def get_db_connection() -> Connection:
     return await asyncpg.connect(DATABASE_URL)
 
 async def init_db():
-    """Crée les tables si elles n'existent pas."""
-    conn = await get_db_connection()
-    try:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS dossiers_personnel (
-                id SERIAL PRIMARY KEY,
-                prenom TEXT,
-                nom TEXT,
-                age TEXT,
-                groupe_sanguin TEXT,
-                allergies TEXT,
-                contact_urgence TEXT,
-                created_by INTEGER,
-                created_at TEXT,
-                updated_at TEXT,
-                UNIQUE(prenom, nom)
-            )
-        """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS dossiers_intervention (
-                id SERIAL PRIMARY KEY,
-                patient_prenom TEXT,
-                patient_nom TEXT,
-                blessure TEXT,
-                soins TEXT,
-                transport TEXT,
-                facture TEXT,
-                statut_facture TEXT,
-                created_by INTEGER,
-                created_by_name TEXT,
-                created_at TEXT
-            )
-        """)
-    finally:
-        await conn.close()
+    ""async def init_db():
+    """Crée les tables si elles n'existent pas, avec gestion des erreurs de connexion."""
+    retries = 5
+    delay = 3  # secondes d'attente entre chaque tentative
+    
+    for attempt in range(1, retries + 1):
+        try:
+            conn = await get_db_connection()
+            try:
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS dossiers_personnel (
+                        id SERIAL PRIMARY KEY,
+                        prenom TEXT,
+                        nom TEXT,
+                        age TEXT,
+                        groupe_sanguin TEXT,
+                        allergies TEXT,
+                        contact_urgence TEXT,
+                        created_by INTEGER,
+                        created_at TEXT,
+                        updated_at TEXT,
+                        UNIQUE(prenom, nom)
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS dossiers_intervention (
+                        id SERIAL PRIMARY KEY,
+                        patient_prenom TEXT,
+                        patient_nom TEXT,
+                        blessure TEXT,
+                        soins TEXT,
+                        transport TEXT,
+                        facture TEXT,
+                        statut_facture TEXT,
+                        created_by INTEGER,
+                        created_by_name TEXT,
+                        created_at TEXT
+                    )
+                """)
+                print("✅ Connexion à la base de données établie et tables créées.")
+                return # On sort de la fonction si tout est bon
+            finally:
+                await conn.close()
+                
+        except Exception as e:
+            print(f"⚠️ Tentative {attempt}/{retries} de connexion à la DB échouée : {e}")
+            if attempt == retries:
+                print("❌ Échec définitif de la connexion à la DB. Arrêt du bot.")
+                raise e # Si ça échoue 5 fois, le bot plante volontairement pour que Railway le redémarre
+            await asyncio.sleep(delay) # Attend 3 secondes avant la prochaine tentative
 
 # ------- FONCTIONS D'ACCÈS -------
 
