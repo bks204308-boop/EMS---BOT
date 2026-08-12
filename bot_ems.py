@@ -36,7 +36,7 @@ async def get_db_connection() -> Connection:
     return await asyncpg.connect(DATABASE_URL)
 
 async def init_db():
-    ""async def init_db():
+    async def init_db():
     """Crée les tables si elles n'existent pas, avec gestion des erreurs de connexion."""
     retries = 5
     delay = 3  # secondes d'attente entre chaque tentative
