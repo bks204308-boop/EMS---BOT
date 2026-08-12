@@ -1710,47 +1710,26 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 # ---------- DÉMARRAGE ----------
-@bot.event
-async def on_ready():
-    await db.init_pool()  # Initialisation de la base PostgreSQL
-    logger.info(f"✅ Connecté en tant que {bot.user} (ID: {bot.user.id})")
-    print(f"✅ Connecté en tant que {bot.user}")
-    print(f"📋 Le bot est sur {len(bot.guilds)} serveur(s) :")
-    for guild in bot.guilds:
-        print(f"   - {guild.name} (ID: {guild.id})")
+async def main():
+    """Fonction principale pour initialiser le bot et la base de données."""
+    # 1. On initialise la base de données PostgreSQL AVANT de démarrer le bot
+    await db.init_pool()
+    logger.info("✅ Base de données PostgreSQL connectée avec succès.")
+    
+    # 2. On initialise le bot proprement avec un gestionnaire de contexte
+    async with bot:
+        # 3. On lance le bot
+        await bot.start(TOKEN)
 
-    # Nettoyage des anciennes commandes spécifiques aux serveurs pour éviter les doublons
-    print("🧹 Nettoyage des anciennes commandes spécifiques aux serveurs...")
-    for guild in bot.guilds:
-        try:
-            bot.tree.clear_commands(guild=guild)
-            await bot.tree.sync(guild=guild)
-            print(f"   ✅ Commandes nettoyées pour le serveur {guild.name}")
-        except Exception as e:
-            print(f"   ⚠️ Erreur lors du nettoyage pour {guild.name} : {e}")
-
-    # Synchronisation GLOBALE (tous les serveurs)
-    try:
-        await bot.tree.sync()
-        print("✅ Commandes globales synchronisées")
-    except Exception as e:
-        print(f"❌ Erreur sync globale : {e}")
-
-    # Vérifier le nombre de commandes enregistrées
-    try:
-        cmds = await bot.tree.fetch_commands()
-        print(f"📋 {len(cmds)} commandes disponibles globalement :")
-        for cmd in cmds:
-            print(f"   - /{cmd.name}")
-    except Exception as e:
-        print(f"❌ Erreur fetch_commands : {e}")
-
-    print("🚀 Bot prêt !")
-    logger.info("✅ Démarrage terminé.")
-
+# Lancement sécurisé du bot
 if __name__ == "__main__":
     if not TOKEN:
         print("❌ ERREUR : DISCORD_TOKEN non défini !")
         logger.error("DISCORD_TOKEN non défini")
     else:
-        bot.run(TOKEN)
+        try:
+            # asyncio.run() gère toute la boucle d'événements
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            # Pour arrêter proprement le bot si on fait Ctrl+C
+            print("\n🛑 Bot arrêté manuellement.")
