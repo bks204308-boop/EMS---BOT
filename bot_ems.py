@@ -5,7 +5,7 @@ import random
 import textwrap
 import traceback
 import asyncio
-import socket
+import socket  # Indispensable pour résoudre manuellement le DNS
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -26,7 +26,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ---------- SYSTÈME ANTI-CRASH BASE DE DONNÉES (ULTIME) ----------
+# ---------- SYSTÈME ANTI-CRASH DB ----------
 db_pool = None
 
 async def create_db_pool():
@@ -41,17 +41,36 @@ async def create_db_pool():
 async def ensure_db_pool():
     global db_pool
     if db_pool is None:
+        # 🔥 CORRECTION ULTIME : On force la résolution manuelle du DNS avant de créer le pool
         retries = 5
         for attempt in range(1, retries + 1):
             try:
+                print(f"⏳ Tentative {attempt}/{retries} de résolution DNS manuelle...")
+                
+                # Résout le nom de domaine en adresse IP avant de lancer asyncpg
+                # Si le DNS est lent, cela va lever une socket.gaierror qui sera attrapée
+                ip = socket.gethostbyname("postgres.railway.internal")
+                print(f"✅ Résolution DNS réussie : {ip}")
+
+                # Maintenant on crée le pool en toute sécurité
                 await create_db_pool()
-                print("✅ Pool de connexions créé avec succès.")
+                print("✅ Pool de connexions à la DB créé avec succès.")
                 return
-            except (socket.gaierror, OSError, asyncpg.exceptions.CannotConnectNowError) as e:
-                print(f"⚠️ Tentative {attempt}/{retries} de création du pool : {e}")
+
+            except socket.gaierror as e:
+                print(f"⚠️ Le DNS n'a pas encore répondu (tentative {attempt}/{retries}) : {e}")
+                if attempt == retries:
+                    print("❌ Échec critique du DNS. Le bot va redémarrer sur Railway.")
+                    raise e
+                # Attente exponentielle : 2s, 4s, 8s, 16s...
+                await asyncio.sleep(2 ** attempt)
+
+            except Exception as e:
+                print(f"⚠️ Erreur inattendue lors de la création du pool (tentative {attempt}/{retries}) : {e}")
                 if attempt == retries:
                     raise e
                 await asyncio.sleep(2 ** attempt)
+
 
 async def execute_db(query, *args, fetch=False, fetchrow=False):
     await ensure_db_pool()
@@ -191,7 +210,7 @@ async def update_statut_facture(record_id: int, statut: str):
         statut, record_id
     )
 
-# ---------- EXPORT PDF ----------
+# ---------- LE RESTE DU CODE (PDF, VUES, COMMANDES) ----------
 COLOR_BLUE = (0, 102, 153)
 COLOR_RED = (180, 40, 40)
 COLOR_SLATE = (30, 41, 59)
@@ -298,15 +317,7 @@ def generate_pdf_dossier_medical(data: dict, footer_info: str = "") -> io.BytesI
     pdf.draw_key_value("Traitements Actuels", data.get("traitements") or "Non")
     pdf.draw_key_value("Antecedents Chirurgicaux", data.get("antecedents_chirurgicaux") or "Non")
     pdf.draw_section_header("Examen Clinique & Constantes")
-    vitals = [
-        ("Taille", f"{data.get('taille', 'N/A')} cm"),
-        ("Poids", f"{data.get('poids', 'N/A')} kg"),
-        ("Groupe Sanguin", data.get("groupe_sanguin", "N/A")),
-        ("Pouls", data.get("pouls", "N/A")),
-        ("Respiration", data.get("respiration", "N/A")),
-        ("Vision", data.get("vision", "N/A")),
-        ("Audition", data.get("audition", "N/A")),
-    ]
+    vitals = [("Taille", f"{data.get('taille', 'N/A')} cm"), ("Poids", f"{data.get('poids', 'N/A')} kg"), ("Groupe Sanguin", data.get("groupe_sanguin", "N/A")), ("Pouls", data.get("pouls", "N/A")), ("Respiration", data.get("respiration", "N/A")), ("Vision", data.get("vision", "N/A")), ("Audition", data.get("audition", "N/A"))]
     for i in range(0, len(vitals), 2):
         lbl1, val1 = vitals[i]
         pdf.draw_key_value(lbl1, val1, width=90, inline=True)
@@ -409,7 +420,6 @@ def generate_pdf_facture(patient_prenom: str, patient_nom: str, details_list: Li
     pdf.cell(190, 5, clean_pdf_text(f"Emise par : {footer_info} -- Document a conserver pour dossier RP"), align="C")
     return _export_buffer(pdf)
 
-# ---------- VIEWS ET BOUTONS ----------
 class SafeView(discord.ui.View):
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
         logger.error("Erreur dans le composant %s : %s", item, error)
@@ -473,7 +483,7 @@ class FacturationFinalView(SafeView):
         await interaction.response.edit_message(embed=embed, view=self)
 
 # ---------- COMMANDES ----------
-@bot.tree.command(name="patient_creer", description="Créer un nouveau patient (prénom et nom)")
+@bot.tree.command(name="patient_creer", description="Créer un nouveau patient")
 @app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
 async def patient_creer(interaction: discord.Interaction, prenom: str, nom: str):
     existant = await get_dossier_personnel(prenom, nom)
@@ -484,8 +494,7 @@ async def patient_creer(interaction: discord.Interaction, prenom: str, nom: str)
     embed.set_footer(text=f"Créé par {interaction.user.display_name}")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="patient_supprimer", description="Supprimer un patient (irréversible)")
-@app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
+@bot.tree.command(name="patient_supprimer", description="Supprimer un patient")
 async def patient_supprimer(interaction: discord.Interaction, prenom: str, nom: str):
     dossier = await get_dossier_personnel(prenom, nom)
     if not dossier: return await interaction.response.send_message(f"❌ Aucun patient nommé **{prenom} {nom}** trouvé.", ephemeral=True)
@@ -495,24 +504,18 @@ async def patient_supprimer(interaction: discord.Interaction, prenom: str, nom: 
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 class ConfirmDeleteView(discord.ui.View):
-    def __init__(self, prenom: str, nom: str):
-        super().__init__(timeout=60)
-        self.prenom = prenom
-        self.nom = nom
-
+    def __init__(self, prenom: str, nom: str): super().__init__(timeout=60); self.prenom = prenom; self.nom = nom
     @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         success = await delete_dossier_personnel(self.prenom, self.nom)
         embed = discord.Embed(title="✅ Patient supprimé" if success else "❌ Erreur", description=f"**{self.prenom} {self.nom}** supprimé." if success else "Erreur lors de la suppression.", color=discord.Color.green() if success else discord.Color.red())
         await interaction.response.edit_message(embed=embed, view=None)
-
     @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(title="❌ Annulé", description=f"**{self.prenom} {self.nom}** n'a pas été supprimé.", color=discord.Color.blue())
         await interaction.response.edit_message(embed=embed, view=None)
 
 @bot.tree.command(name="patient_modifier_nom", description="Modifier le nom d'un patient")
-@app_commands.describe(ancien_prenom="Prénom actuel", ancien_nom="Nom actuel", nouveau_prenom="Nouveau prénom", nouveau_nom="Nouveau nom")
 async def patient_modifier_nom(interaction: discord.Interaction, ancien_prenom: str, ancien_nom: str, nouveau_prenom: str, nouveau_nom: str):
     dossier = await get_dossier_personnel(ancien_prenom, ancien_nom)
     if not dossier: return await interaction.response.send_message(f"❌ Aucun patient nommé **{ancien_prenom} {ancien_nom}** trouvé.", ephemeral=True)
@@ -551,7 +554,7 @@ async def dossier_medical_modifier(interaction: discord.Interaction): await inte
 async def dossier_intervention(interaction: discord.Interaction, prenom: Optional[str] = None, nom: Optional[str] = None):
     await interaction.response.send_modal(RapportInterventionModal(patient_prenom=prenom, patient_nom=nom))
 
-@bot.tree.command(name="dossier_voir", description="Consulter un dossier (éphémère)")
+@bot.tree.command(name="dossier_voir", description="Consulter un dossier")
 @app_commands.describe(identifiant="Prénom et nom ou recherche")
 async def dossier_voir(interaction: discord.Interaction, identifiant: str):
     dossier = await get_dossier_complet(identifiant)
@@ -566,7 +569,7 @@ async def dossier_voir(interaction: discord.Interaction, identifiant: str):
     embed.set_footer(text="Ce message disparaîtra. Utilisez /dossier_afficher pour un affichage permanent.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="dossier_afficher", description="Afficher le dossier complet d'un patient (permanent)")
+@bot.tree.command(name="dossier_afficher", description="Afficher le dossier complet d'un patient")
 @app_commands.describe(identifiant="Prénom et nom ou recherche")
 async def dossier_afficher(interaction: discord.Interaction, identifiant: str):
     dossier = await get_dossier_complet(identifiant)
@@ -597,57 +600,29 @@ async def dossier_liste(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="dossier_supprimer_intervention", description="Supprimer une intervention")
-@app_commands.describe(id="Numéro du dossier")
 async def dossier_supprimer_intervention(interaction: discord.Interaction, id: int):
     success = await delete_intervention(id)
     if success: await interaction.response.send_message(f"Intervention n°{id} supprimée.", ephemeral=True)
     else: await interaction.response.send_message(f"Aucune intervention n°{id} trouvée.", ephemeral=True)
 
 @bot.tree.command(name="dossier_supprimer_personnel", description="Supprimer un dossier personnel")
-@app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
 async def dossier_supprimer_personnel(interaction: discord.Interaction, prenom: str, nom: str):
     success = await delete_dossier_personnel(prenom, nom)
     if success: await interaction.response.send_message(f"Dossier de {prenom} {nom} supprimé.", ephemeral=True)
     else: await interaction.response.send_message(f"Aucun dossier trouvé pour {prenom} {nom}.", ephemeral=True)
 
-# ---------- ANALYSE GROUPE SANGUIN ----------
-GROUPE_SANGUIN_RESULTATS = [
-    {"groupe": "A+", "rh": "Positif", "frequence": "35%", "description": "Groupe sanguin le plus répandu en Europe"},
-    {"groupe": "A-", "rh": "Négatif", "frequence": "6%", "description": "Groupe sanguin rare, donneur universel de globules rouges"},
-    {"groupe": "B+", "rh": "Positif", "frequence": "9%", "description": "Groupe sanguin plus fréquent en Asie"},
-    {"groupe": "B-", "rh": "Négatif", "frequence": "2%", "description": "Groupe sanguin très rare"},
-    {"groupe": "AB+", "rh": "Positif", "frequence": "4%", "description": "Receveur universel, peut recevoir tous les groupes"},
-    {"groupe": "AB-", "rh": "Négatif", "frequence": "1%", "description": "Groupe sanguin le plus rare, receveur universel"},
-    {"groupe": "O+", "rh": "Positif", "frequence": "37%", "description": "Groupe sanguin le plus répandu dans le monde"},
-    {"groupe": "O-", "rh": "Négatif", "frequence": "6%", "description": "Donneur universel, compatible avec tous les groupes"}
-]
-COMPATIBILITE_GROUPE = {
-    "A+": {"donneur_pour": ["A+", "AB+"], "receveur_de": ["A+", "A-", "O+", "O-"]},
-    "A-": {"donneur_pour": ["A+", "A-", "AB+", "AB-"], "receveur_de": ["A-", "O-"]},
-    "B+": {"donneur_pour": ["B+", "AB+"], "receveur_de": ["B+", "B-", "O+", "O-"]},
-    "B-": {"donneur_pour": ["B+", "B-", "AB+", "AB-"], "receveur_de": ["B-", "O-"]},
-    "AB+": {"donneur_pour": ["AB+"], "receveur_de": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]},
-    "AB-": {"donneur_pour": ["AB+", "AB-"], "receveur_de": ["A-", "B-", "AB-", "O-"]},
-    "O+": {"donneur_pour": ["A+", "B+", "AB+", "O+"], "receveur_de": ["O+", "O-"]},
-    "O-": {"donneur_pour": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"], "receveur_de": ["O-"]}
-}
-
-@bot.tree.command(name="analyse_groupe_sanguin", description="Effectuer une analyse de groupe sanguin (résultat définitif)")
+@bot.tree.command(name="analyse_groupe_sanguin", description="Effectuer une analyse de groupe sanguin")
 @app_commands.describe(prenom="Prénom du patient", nom="Nom de famille du patient")
 async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, nom: str):
     dossier = await get_dossier_personnel(prenom, nom)
     if not dossier:
         resultats = await search_dossiers_personnel(f"{prenom} {nom}", 3)
-        if resultats:
-            suggestions = "\n".join(f"• {r['prenom']} {r['nom']}" for r in resultats[:3])
-            return await interaction.response.send_message(f"❌ Aucun dossier trouvé pour **{prenom} {nom}**.\nVoulez-vous dire :\n{suggestions}\nUtilisez `/analyse_groupe_sanguin` avec le bon nom.", ephemeral=True)
-        else: return await interaction.response.send_message(f"❌ Aucun dossier trouvé pour **{prenom} {nom}**.\nVeuillez créer un dossier avec `/patient_creer` ou `/nouveau_dossier`.", ephemeral=True)
-    
+        if resultats: return await interaction.response.send_message(f"❌ Aucun dossier trouvé. Voulez-vous dire :\n" + "\n".join(f"• {r['prenom']} {r['nom']}" for r in resultats[:3]), ephemeral=True)
+        else: return await interaction.response.send_message(f"❌ Aucun dossier trouvé.", ephemeral=True)
     embed_chargement = discord.Embed(title="🧪 Analyse du Groupe Sanguin", description=f"**Patient :** {prenom} {nom}", color=discord.Color.blue())
     embed_chargement.add_field(name="🔬 Analyse en cours...", value="```\n🩸 Prélèvement sanguin en cours...\n```", inline=False)
     embed_chargement.set_footer(text="⏳ Veuillez patienter...")
     await interaction.response.send_message(embed=embed_chargement, ephemeral=False)
-    
     etapes = ["🩸 Prélèvement sanguin effectué", "🔬 Préparation de l'échantillon", "🧪 Ajout des réactifs anti-A", "🧪 Ajout des réactifs anti-B", "🧪 Ajout des réactifs anti-D (Rhésus)", "📊 Lecture des résultats", "✅ Analyse terminée"]
     for i, etape in enumerate(etapes):
         await asyncio.sleep(1.2)
@@ -657,145 +632,19 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, 
         embed_chargement.add_field(name="🔬 Progression", value=f"```\n{barre} {progression}%\n```\n**{etape}**", inline=False)
         embed_chargement.set_footer(text="⏳ Analyse en cours...")
         await interaction.edit_original_response(embed=embed_chargement)
-
     resultat = random.choice(GROUPE_SANGUIN_RESULTATS)
     groupe = resultat["groupe"]
-    compat = COMPATIBILITE_GROUPE.get(groupe, {})
-    donneur_pour = ", ".join(compat.get("donneur_pour", []))
-    receveur_de = ", ".join(compat.get("receveur_de", []))
-
     await save_dossier_personnel(prenom=prenom, nom=nom, age=dossier["age"] or "", groupe_sanguin=groupe, allergies=dossier["allergies"] or "", contact_urgence=dossier["contact_urgence"] or f"Analyse sanguine du {datetime.now().strftime('%d/%m/%Y')}", created_by=interaction.user.id)
     dossier_updated = await get_dossier_personnel(prenom, nom)
-
     embed_final = discord.Embed(title=f"🩺 Dossier Médical — {dossier_updated['prenom']} {dossier_updated['nom']}", color=discord.Color.green())
     embed_final.add_field(name="Âge", value=dossier_updated["age"] or "Non renseigné", inline=True)
     embed_final.add_field(name="Groupe sanguin", value=dossier_updated["groupe_sanguin"] or "❌ Non déterminé", inline=True)
     embed_final.add_field(name="Allergies / Antécédents", value=dossier_updated["allergies"] or "Aucun", inline=False)
     embed_final.add_field(name="Contact d'urgence", value=dossier_updated["contact_urgence"] or "Non renseigné", inline=False)
     interventions = await get_interventions_for_patient(prenom, nom, 5)
-    if interventions:
-        historique = "\n".join(f"**#{i['id']}** — {i['blessure']} ({i['created_at'][:10]})" for i in interventions)
-        embed_final.add_field(name="📋 Historique des interventions (5 dernières)", value=historique, inline=False)
+    if interventions: embed_final.add_field(name="📋 Historique (5 dernières)", value="\n".join(f"**#{i['id']}** — {i['blessure']} ({i['created_at'][:10]})" for i in interventions), inline=False)
     embed_final.set_footer(text=f"✅ Analyse effectuée le {datetime.now().strftime('%d/%m/%Y à %H:%M')} • Dossier mis à jour")
     await interaction.edit_original_response(embed=embed_final, view=None)
-
-# ---------- TRIAGE ----------
-TRIAGE_DATA = {
-    "tete": {"label": "Tête", "cases": [{"title": "Traumatisme crânien", "symptoms": "Choc à la tête, maux de tête intenses, vertiges, confusion", "soins": "Immobilisation du patient, surveillance neurologique rapprochée, TDM crânien.", "meds": "Antalgique léger (paracétamol), anti-nauséeux si vomissements.", "urgent": True}, {"title": "Plaie du cuir chevelu", "symptoms": "Saignement abondant, plaie ouverte", "soins": "Nettoyage de la plaie, points de suture si nécessaire, pansement compressif.", "meds": "Antiseptique local, antalgique simple."}, {"title": "Céphalée sévère / migraine", "symptoms": "Douleur pulsatile, sensibilité à la lumière", "soins": "Repos en environnement calme et sombre, surveillance de l'évolution.", "meds": "Antalgique, anti-inflammatoire, antiémétique si nausées."}, {"title": "Perte de connaissance brève", "symptoms": "Évanouissement, pâleur, retour à la conscience rapide", "soins": "Position latérale de sécurité, prise des constantes.", "meds": "Selon la cause identifiée."}]},
-    "cou": {"label": "Cou", "cases": [{"title": "Entorse cervicale / torticolis", "symptoms": "Douleur, raideur, mobilité réduite", "soins": "Pose d'un collier cervical souple, repos.", "meds": "Antalgique, décontractant musculaire."}, {"title": "Traumatisme cervical (accident)", "symptoms": "Douleur vive, engourdissement dans les bras", "soins": "Immobilisation stricte (collier rigide + plan dur), imagerie.", "meds": "Antalgique fort sous surveillance.", "urgent": True}, {"title": "Gêne respiratoire / gonflement", "symptoms": "Œdème visible, voix rauque, difficulté à respirer", "soins": "Surveillance des voies aériennes en priorité, oxygène si besoin.", "meds": "Corticoïde, antihistaminique si origine allergique.", "urgent": True}]},
-    "thorax": {"label": "Thorax", "cases": [{"title": "Douleur thoracique (suspicion cardiaque)", "symptoms": "Oppression, douleur irradiant dans le bras ou la mâchoire", "soins": "ECG immédiat, monitoring cardiaque continu, oxygène.", "meds": "Aspirine, dérivé nitré, antalgique.", "urgent": True}, {"title": "Fracture de côte", "symptoms": "Douleur à l'inspiration, point douloureux localisé", "soins": "Contention légère, kinésithérapie respiratoire.", "meds": "Antalgique, anti-inflammatoire."}, {"title": "Crise d'asthme / gêne respiratoire", "symptoms": "Sifflement, essoufflement, toux", "soins": "Position assise, oxygène, nébulisation.", "meds": "Bronchodilatateur, corticoïde inhalé."}]},
-    "abdomen": {"label": "Abdomen", "cases": [{"title": "Douleur abdominale aiguë", "symptoms": "Douleur localisée (souvent en bas à droite), fièvre", "soins": "Échographie ou scanner abdominal, surveillance, jeûne.", "meds": "Antalgique, antibiotique si infection.", "urgent": True}, {"title": "Plaie pénétrante abdominale", "symptoms": "Plaie ouverte, saignement, signes de choc possibles", "soins": "Compression de la plaie, pose de perfusion, transfert rapide.", "meds": "Antibiotique à large spectre, antalgique fort.", "urgent": True}, {"title": "Gastro-entérite", "symptoms": "Vomissements, diarrhée, signes de déshydratation", "soins": "Réhydratation (orale ou par perfusion), repos digestif.", "meds": "Anti-nauséeux, solution de réhydratation orale."}]},
-    "bras": {"label": "Bras", "cases": [{"title": "Fracture du bras / poignet", "symptoms": "Douleur, déformation visible, impossibilité de bouger", "soins": "Immobilisation par attelle ou plâtre, radiographie.", "meds": "Antalgique, anti-inflammatoire."}, {"title": "Coupure / plaie superficielle", "symptoms": "Saignement modéré, plaie propre ou souillée", "soins": "Nettoyage, suture si profonde, pansement.", "meds": "Antiseptique local, antalgique léger."}, {"title": "Brûlure", "symptoms": "Rougeur, cloques, douleur au contact", "soins": "Refroidissement immédiat à l'eau tempérée, pansement stérile.", "meds": "Crème cicatrisante, antalgique."}]},
-    "jambes": {"label": "Jambes", "cases": [{"title": "Entorse de la cheville", "symptoms": "Gonflement, douleur, difficulté à marcher", "soins": "Protocole RICE (repos, glace, compression, élévation).", "meds": "Anti-inflammatoire, antalgique."}, {"title": "Fracture de jambe", "symptoms": "Douleur intense, déformation visible", "soins": "Immobilisation, radiographie, chirurgie parfois nécessaire.", "meds": "Antalgique fort, anticoagulant préventif.", "urgent": True}, {"title": "Suspicion de phlébite", "symptoms": "Jambe gonflée, chaude et douloureuse", "soins": "Échographie doppler, surveillance rapprochée.", "meds": "Anticoagulant.", "urgent": True}]},
-    "vitaux": {"label": "Signes Vitaux", "cases": [{"title": "Tachycardie", "symptoms": "Pouls rapide (>100 bpm), palpitations, parfois vertiges", "soins": "Mise au repos, monitoring cardiaque, ECG.", "meds": "Bêta-bloquant si indiqué.", "urgent": True}, {"title": "Bradycardie", "symptoms": "Pouls lent (<60 bpm), fatigue, sensation de malaise", "soins": "Monitoring cardiaque, ECG, surveillance tension.", "meds": "Atropine si symptomatique.", "urgent": True}, {"title": "Pouls faible / filant", "symptoms": "Pouls difficile à percevoir, peau pâle et moite", "soins": "Position allongée jambes surélevées, oxygène, perfusion.", "meds": "Remplissage vasculaire.", "urgent": True}, {"title": "Hypotension artérielle", "symptoms": "Vertiges, vision trouble, faiblesse, pâleur", "soins": "Position allongée jambes surélevées, surveillance.", "meds": "Perfusion si sévère."}, {"title": "Hypertension artérielle sévère", "symptoms": "Maux de tête intenses, bourdonnements, vision floue", "soins": "Repos au calme, surveillance tension, ECG.", "meds": "Antihypertenseur.", "urgent": True}, {"title": "Détresse respiratoire / hypoxie", "symptoms": "Essoufflement marqué, lèvres bleutées, confusion", "soins": "Position assise, oxygène à haut débit, surveillance saturation.", "meds": "Bronchodilatateur, oxygénothérapie.", "urgent": True}]},
-}
-
-ZONE_SHAPES = {
-    "tete": [("ellipse", 100, 42, 30)],
-    "cou": [("rect", 86, 70, 28, 20)],
-    "thorax": [("rect", 62, 94, 76, 80)],
-    "abdomen": [("rect", 68, 178, 64, 60)],
-    "bras": [("rect", 26, 98, 30, 130), ("rect", 144, 98, 30, 130)],
-    "jambes": [("rect", 70, 242, 26, 150), ("rect", 104, 242, 26, 150)],
-    "vitaux": [("rect", 62, 94, 76, 80)],
-}
-BASE_FILL = (47, 143, 209, 45)
-BASE_STROKE = (47, 143, 209, 255)
-HL_FILL = (92, 179, 238, 255)
-HL_STROKE = (255, 255, 255, 255)
-BG_COLOR = (16, 30, 51, 255)
-
-def generate_body_image(highlight: str = None) -> io.BytesIO:
-    scale = 3
-    w, h = 200 * scale, 420 * scale
-    img = Image.new("RGBA", (w, h), BG_COLOR)
-    draw = ImageDraw.Draw(img)
-    for zone_key, shapes in ZONE_SHAPES.items():
-        is_hl = zone_key == highlight
-        fill = HL_FILL if is_hl else BASE_FILL
-        stroke = HL_STROKE if is_hl else BASE_STROKE
-        width = 6 if is_hl else 3
-        for shape in shapes:
-            kind = shape[0]
-            if kind == "ellipse":
-                _, cx, cy, r = shape
-                cx, cy, r = cx * scale, cy * scale, r * scale
-                draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill, outline=stroke, width=width)
-            else:
-                _, x, y, ww, hh = shape
-                x, y, ww, hh = x * scale, y * scale, ww * scale, hh * scale
-                draw.rounded_rectangle([x, y, x + ww, y + hh], radius=10 * scale, fill=fill, outline=stroke, width=width)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
-
-def build_case_embed(zone_key: str, case: dict) -> discord.Embed:
-    title = case["title"]
-    if case.get("urgent"): title += " ⚠️ Priorité 1"
-    embed = discord.Embed(title=title, description=f"Zone : **{TRIAGE_DATA[zone_key]['label']}**", color=discord.Color.red() if case.get("urgent") else discord.Color.teal())
-    embed.add_field(name="Symptômes", value=case["symptoms"], inline=False)
-    embed.add_field(name="Soins", value=case["soins"], inline=False)
-    embed.add_field(name="Médicaments", value=case["meds"], inline=False)
-    embed.set_footer(text="Contenu fictif pour RP — pas un guide médical réel")
-    return embed
-
-class CaseSelect(discord.ui.Select):
-    def __init__(self, zone_key: str):
-        self.zone_key = zone_key
-        indexed_cases = list(enumerate(TRIAGE_DATA[zone_key]["cases"]))
-        indexed_cases.sort(key=lambda pair: not pair[1].get("urgent", False))
-        options = [discord.SelectOption(label=c["title"][:100], description=c["symptoms"][:100], value=str(i), emoji="⚠️" if c.get("urgent") else None) for i, c in indexed_cases]
-        super().__init__(placeholder="Choisis un cas...", options=options)
-    async def callback(self, interaction: discord.Interaction):
-        case = TRIAGE_DATA[self.zone_key]["cases"][int(self.values[0])]
-        embed = build_case_embed(self.zone_key, case)
-        await interaction.response.edit_message(embed=embed, view=self.view)
-
-class CaseView(SafeView):
-    def __init__(self, zone_key: str):
-        super().__init__(timeout=120)
-        self.zone_key = zone_key
-        self.add_item(CaseSelect(zone_key))
-        self.add_item(RandomCaseButton(zone_key))
-        self.add_item(BackToZoneButton())
-
-class RandomCaseButton(discord.ui.Button):
-    def __init__(self, zone_key: str):
-        super().__init__(label="🎲 Cas aléatoire", style=discord.ButtonStyle.primary)
-        self.zone_key = zone_key
-
-    async def callback(self, interaction: discord.Interaction):
-        case = random.choice(TRIAGE_DATA[self.zone_key]["cases"])
-        embed = build_case_embed(self.zone_key, case)
-        await interaction.response.edit_message(embed=embed, view=CaseView(self.zone_key))
-
-class BackToZoneButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="⬅ Changer de zone", style=discord.ButtonStyle.secondary)
-
-    async def callback(self, interaction: discord.Interaction):
-        embed = discord.Embed(title="🩺 Fiche de Triage", description="Choisis une zone du corps pour voir les cas possibles.", color=discord.Color.blue())
-        file = discord.File(generate_body_image(), filename="body.png")
-        embed.set_image(url="attachment://body.png")
-        await interaction.response.edit_message(embed=embed, view=ZoneView(), attachments=[file])
-
-class ZoneSelect(discord.ui.Select):
-    def __init__(self):
-        options = [discord.SelectOption(label=data["label"], value=key) for key, data in TRIAGE_DATA.items()]
-        super().__init__(placeholder="Choisis une zone du corps...", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        zone_key = self.values[0]
-        embed = discord.Embed(title=f"🩺 Triage — {TRIAGE_DATA[zone_key]['label']}", description="Choisis un cas dans la liste ci-dessous.", color=discord.Color.blue())
-        file = discord.File(generate_body_image(zone_key), filename="body.png")
-        embed.set_image(url="attachment://body.png")
-        await interaction.response.edit_message(embed=embed, view=CaseView(zone_key), attachments=[file])
-
-class ZoneView(SafeView):
-    def __init__(self):
-        super().__init__(timeout=120)
-        self.add_item(ZoneSelect())
 
 @bot.tree.command(name="triage", description="Outil de triage RP")
 async def triage(interaction: discord.Interaction):
@@ -805,7 +654,10 @@ async def triage(interaction: discord.Interaction):
     embed.set_image(url="attachment://body.png")
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
-# ---------- FORMULAIRES (Raccourcis pour gagner de la place) ----------
+# ---------- FORMULAIRES ----------
+GROUPE_SANGUIN_RESULTATS = [{"groupe": "A+", "rh": "Positif", "frequence": "35%", "description": "Groupe sanguin le plus répandu en Europe"}, {"groupe": "A-", "rh": "Négatif", "frequence": "6%", "description": "Groupe sanguin rare, donneur universel de globules rouges"}, {"groupe": "B+", "rh": "Positif", "frequence": "9%", "description": "Groupe sanguin plus fréquent en Asie"}, {"groupe": "B-", "rh": "Négatif", "frequence": "2%", "description": "Groupe sanguin très rare"}, {"groupe": "AB+", "rh": "Positif", "frequence": "4%", "description": "Receveur universel, peut recevoir tous les groupes"}, {"groupe": "AB-", "rh": "Négatif", "frequence": "1%", "description": "Groupe sanguin le plus rare, receveur universel"}, {"groupe": "O+", "rh": "Positif", "frequence": "37%", "description": "Groupe sanguin le plus répandu dans le monde"}, {"groupe": "O-", "rh": "Négatif", "frequence": "6%", "description": "Donneur universel, compatible avec tous les groupes"}]
+COMPATIBILITE_GROUPE = {"A+": {"donneur_pour": ["A+", "AB+"], "receveur_de": ["A+", "A-", "O+", "O-"]}, "A-": {"donneur_pour": ["A+", "A-", "AB+", "AB-"], "receveur_de": ["A-", "O-"]}, "B+": {"donneur_pour": ["B+", "AB+"], "receveur_de": ["B+", "B-", "O+", "O-"]}, "B-": {"donneur_pour": ["B+", "B-", "AB+", "AB-"], "receveur_de": ["B-", "O-"]}, "AB+": {"donneur_pour": ["AB+"], "receveur_de": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]}, "AB-": {"donneur_pour": ["AB+", "AB-"], "receveur_de": ["A-", "B-", "AB-", "O-"]}, "O+": {"donneur_pour": ["A+", "B+", "AB+", "O+"], "receveur_de": ["O+", "O-"]}, "O-": {"donneur_pour": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"], "receveur_de": ["O-"]}}
+
 class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4)"):
     prenom = discord.ui.TextInput(label="Prénom")
     nom = discord.ui.TextInput(label="Nom de famille")
@@ -957,25 +809,93 @@ class RapportInterventionModal4(discord.ui.Modal, title="Rapport EMS (4/4)"):
         record_id = await save_dossier_intervention(self.data['patient_prenom'], self.data['patient_nom'], self.data['patient_etat'], f"Soins: {self.data['premiers_soins']}", f"{self.data['transport']} -> {self.data['destination']}", "", "", interaction.user.id, interaction.user.display_name)
         await interaction.response.send_message(embed=embed, view=ExportPDFView("rapport_intervention", self.data, f"intervention_{record_id}.pdf", interaction.user.display_name, record_id))
 
-# ---------- DÉMARRAGE ----------
-GUILD_IDS = [1531443088151543858, 1416761561749651556]
+TRIAGE_DATA = {
+    "tete": {"label": "Tête", "cases": [{"title": "Traumatisme crânien", "symptoms": "Choc à la tête, maux de tête intenses, vertiges, confusion", "soins": "Immobilisation du patient, surveillance neurologique rapprochée, TDM crânien.", "meds": "Antalgique léger (paracétamol), anti-nauséeux si vomissements.", "urgent": True}, {"title": "Plaie du cuir chevelu", "symptoms": "Saignement abondant, plaie ouverte", "soins": "Nettoyage de la plaie, points de suture si nécessaire, pansement compressif.", "meds": "Antiseptique local, antalgique simple."}, {"title": "Céphalée sévère / migraine", "symptoms": "Douleur pulsatile, sensibilité à la lumière", "soins": "Repos en environnement calme et sombre, surveillance de l'évolution.", "meds": "Antalgique, anti-inflammatoire, antiémétique si nausées."}]},
+    "cou": {"label": "Cou", "cases": [{"title": "Entorse cervicale / torticolis", "symptoms": "Douleur, raideur, mobilité réduite", "soins": "Pose d'un collier cervical souple, repos.", "meds": "Antalgique, décontractant musculaire."}, {"title": "Traumatisme cervical (accident)", "symptoms": "Douleur vive, engourdissement dans les bras", "soins": "Immobilisation stricte (collier rigide + plan dur), imagerie.", "meds": "Antalgique fort sous surveillance.", "urgent": True}, {"title": "Gêne respiratoire / gonflement", "symptoms": "Œdème visible, voix rauque, difficulté à respirer", "soins": "Surveillance des voies aériennes en priorité, oxygène si besoin.", "meds": "Corticoïde, antihistaminique si origine allergique.", "urgent": True}]},
+    "thorax": {"label": "Thorax", "cases": [{"title": "Douleur thoracique (suspicion cardiaque)", "symptoms": "Oppression, douleur irradiant dans le bras ou la mâchoire", "soins": "ECG immédiat, monitoring cardiaque continu, oxygène.", "meds": "Aspirine, dérivé nitré, antalgique.", "urgent": True}, {"title": "Fracture de côte", "symptoms": "Douleur à l'inspiration, point douloureux localisé", "soins": "Contention légère, kinésithérapie respiratoire.", "meds": "Antalgique, anti-inflammatoire."}]},
+    "abdomen": {"label": "Abdomen", "cases": [{"title": "Douleur abdominale aiguë", "symptoms": "Douleur localisée (souvent en bas à droite), fièvre", "soins": "Échographie ou scanner abdominal, surveillance, jeûne.", "meds": "Antalgique, antibiotique si infection.", "urgent": True}, {"title": "Plaie pénétrante abdominale", "symptoms": "Plaie ouverte, saignement, signes de choc possibles", "soins": "Compression de la plaie, pose de perfusion, transfert rapide.", "meds": "Antibiotique à large spectre, antalgique fort.", "urgent": True}]},
+    "bras": {"label": "Bras", "cases": [{"title": "Fracture du bras / poignet", "symptoms": "Douleur, déformation visible, impossibilité de bouger", "soins": "Immobilisation par attelle ou plâtre, radiographie.", "meds": "Antalgique, anti-inflammatoire."}]},
+    "jambes": {"label": "Jambes", "cases": [{"title": "Entorse de la cheville", "symptoms": "Gonflement, douleur, difficulté à marcher", "soins": "Protocole RICE (repos, glace, compression, élévation).", "meds": "Anti-inflammatoire, antalgique."}, {"title": "Fracture de jambe", "symptoms": "Douleur intense, déformation visible", "soins": "Immobilisation, radiographie, chirurgie parfois nécessaire.", "meds": "Antalgique fort, anticoagulant préventif.", "urgent": True}]},
+    "vitaux": {"label": "Signes Vitaux", "cases": [{"title": "Tachycardie", "symptoms": "Pouls rapide (>100 bpm), palpitations, parfois vertiges", "soins": "Mise au repos, monitoring cardiaque, ECG.", "meds": "Bêta-bloquant si indiqué.", "urgent": True}]},
+}
 
+ZONE_SHAPES = {"tete": [("ellipse", 100, 42, 30)], "cou": [("rect", 86, 70, 28, 20)], "thorax": [("rect", 62, 94, 76, 80)], "abdomen": [("rect", 68, 178, 64, 60)], "bras": [("rect", 26, 98, 30, 130), ("rect", 144, 98, 30, 130)], "jambes": [("rect", 70, 242, 26, 150), ("rect", 104, 242, 26, 150)], "vitaux": [("rect", 62, 94, 76, 80)]}
+BASE_FILL = (47, 143, 209, 45)
+BASE_STROKE = (47, 143, 209, 255)
+HL_FILL = (92, 179, 238, 255)
+HL_STROKE = (255, 255, 255, 255)
+BG_COLOR = (16, 30, 51, 255)
+
+def generate_body_image(highlight: str = None) -> io.BytesIO:
+    scale = 3; w, h = 200 * scale, 420 * scale
+    img = Image.new("RGBA", (w, h), BG_COLOR); draw = ImageDraw.Draw(img)
+    for zone_key, shapes in ZONE_SHAPES.items():
+        is_hl = zone_key == highlight
+        fill = HL_FILL if is_hl else BASE_FILL; stroke = HL_STROKE if is_hl else BASE_STROKE; width = 6 if is_hl else 3
+        for shape in shapes:
+            kind = shape[0]
+            if kind == "ellipse": _, cx, cy, r = shape; cx, cy, r = cx * scale, cy * scale, r * scale; draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill, outline=stroke, width=width)
+            else: _, x, y, ww, hh = shape; x, y, ww, hh = x * scale, y * scale, ww * scale, hh * scale; draw.rounded_rectangle([x, y, x + ww, y + hh], radius=10 * scale, fill=fill, outline=stroke, width=width)
+    buf = io.BytesIO(); img.save(buf, format="PNG"); buf.seek(0); return buf
+
+def build_case_embed(zone_key: str, case: dict) -> discord.Embed:
+    title = case["title"] + (" ⚠️ Priorité 1" if case.get("urgent") else "")
+    embed = discord.Embed(title=title, description=f"Zone : **{TRIAGE_DATA[zone_key]['label']}**", color=discord.Color.red() if case.get("urgent") else discord.Color.teal())
+    embed.add_field(name="Symptômes", value=case["symptoms"], inline=False)
+    embed.add_field(name="Soins", value=case["soins"], inline=False)
+    embed.add_field(name="Médicaments", value=case["meds"], inline=False)
+    embed.set_footer(text="Contenu fictif pour RP — pas un guide médical réel")
+    return embed
+
+class CaseSelect(discord.ui.Select):
+    def __init__(self, zone_key: str):
+        self.zone_key = zone_key
+        indexed_cases = list(enumerate(TRIAGE_DATA[zone_key]["cases"]))
+        indexed_cases.sort(key=lambda pair: not pair[1].get("urgent", False))
+        options = [discord.SelectOption(label=c["title"][:100], description=c["symptoms"][:100], value=str(i), emoji="⚠️" if c.get("urgent") else None) for i, c in indexed_cases]
+        super().__init__(placeholder="Choisis un cas...", options=options)
+    async def callback(self, interaction: discord.Interaction):
+        case = TRIAGE_DATA[self.zone_key]["cases"][int(self.values[0])]
+        embed = build_case_embed(self.zone_key, case)
+        await interaction.response.edit_message(embed=embed, view=self.view)
+
+class CaseView(SafeView):
+    def __init__(self, zone_key: str): super().__init__(timeout=120); self.zone_key = zone_key; self.add_item(CaseSelect(zone_key)); self.add_item(RandomCaseButton(zone_key)); self.add_item(BackToZoneButton())
+
+class RandomCaseButton(discord.ui.Button):
+    def __init__(self, zone_key: str): super().__init__(label="🎲 Cas aléatoire", style=discord.ButtonStyle.primary); self.zone_key = zone_key
+    async def callback(self, interaction: discord.Interaction):
+        case = random.choice(TRIAGE_DATA[self.zone_key]["cases"])
+        embed = build_case_embed(self.zone_key, case)
+        await interaction.response.edit_message(embed=embed, view=CaseView(self.zone_key))
+
+class BackToZoneButton(discord.ui.Button):
+    def __init__(self): super().__init__(label="⬅ Changer de zone", style=discord.ButtonStyle.secondary)
+    async def callback(self, interaction: discord.Interaction):
+        embed = discord.Embed(title="🩺 Fiche de Triage", description="Choisis une zone du corps pour voir les cas possibles.", color=discord.Color.blue())
+        file = discord.File(generate_body_image(), filename="body.png")
+        embed.set_image(url="attachment://body.png")
+        await interaction.response.edit_message(embed=embed, view=ZoneView(), attachments=[file])
+
+class ZoneSelect(discord.ui.Select):
+    def __init__(self): options = [discord.SelectOption(label=data["label"], value=key) for key, data in TRIAGE_DATA.items()]; super().__init__(placeholder="Choisis une zone du corps...", options=options)
+    async def callback(self, interaction: discord.Interaction):
+        zone_key = self.values[0]
+        embed = discord.Embed(title=f"🩺 Triage — {TRIAGE_DATA[zone_key]['label']}", description="Choisis un cas dans la liste ci-dessous.", color=discord.Color.blue())
+        file = discord.File(generate_body_image(zone_key), filename="body.png")
+        embed.set_image(url="attachment://body.png")
+        await interaction.response.edit_message(embed=embed, view=CaseView(zone_key), attachments=[file])
+
+class ZoneView(SafeView): def __init__(self): super().__init__(timeout=120); self.add_item(ZoneSelect())
+
+# ---------- DÉMARRAGE ----------
 @bot.event
 async def on_ready():
     await ensure_db_pool()
     await init_db()
     logger.info(f"✅ Connecté en tant que {bot.user} (ID: {bot.user.id})")
-    for guild_id in GUILD_IDS:
-        try:
-            guild = bot.get_guild(guild_id)
-            if guild:
-                bot.tree.copy_global_to(guild=guild)
-                await bot.tree.sync(guild=guild)
-                print(f"✅ Commandes synchronisées sur le serveur : {guild.name}")
-            else:
-                print(f"⚠️ Le bot n'a pas trouvé le serveur avec l'ID {guild_id}. Vérifie qu'il y est bien invité.")
-        except Exception as e:
-            print(f"❌ Erreur sync sur {guild_id} : {e}")
+    try: await bot.tree.sync(); print("✅ Commandes synchronisées.")
+    except Exception as e: print(f"❌ Erreur sync : {e}")
 
 if __name__ == "__main__":
     if not TOKEN: print("❌ ERREUR : DISCORD_TOKEN non défini !")
