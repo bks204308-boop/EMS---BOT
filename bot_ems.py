@@ -1644,41 +1644,24 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 # ---------- DÉMARRAGE ----------
-GUILD_IDS = [1531443088151543858, 1416761561749651556]
-
 @bot.event
 async def on_ready():
     await init_db()
-    logger.info(f"✅ Connecté en tant que {bot.user} (ID: {bot.user.id})")
     print(f"✅ Connecté en tant que {bot.user}")
+    print(f"📋 Le bot est sur {len(bot.guilds)} serveur(s)")
 
-    # Supprimer les commandes globales pour éviter les doublons
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync(guild=None)
-    print("✅ Commandes globales supprimées")
+    # Synchronisation GLOBALE (toutes les guildes)
+    await bot.tree.sync()
+    print("✅ Commandes globales synchronisées")
 
-    # Synchroniser uniquement sur les guildes spécifiées
-    for guild_id in GUILD_IDS:
-        try:
-            guild = bot.get_guild(guild_id)
-            if guild:
-                bot.tree.copy_global_to(guild=guild)
-                await bot.tree.sync(guild=guild)
-                logger.info(f"✅ Commandes synchronisées sur : {guild.name}")
-                print(f"✅ Commandes synchronisées sur : {guild.name}")
-            else:
-                logger.warning(f"⚠️ Serveur {guild_id} non trouvé")
-                print(f"⚠️ Serveur {guild_id} non trouvé")
-        except Exception as e:
-            logger.error(f"❌ Erreur sur {guild_id} : {e}")
-            print(f"❌ Erreur sur {guild_id} : {e}")
+    # Afficher le nombre de commandes
+    commands = await bot.tree.fetch_commands()
+    print(f"📋 {len(commands)} commandes disponibles globalement")
 
     print("🚀 Bot prêt !")
-    logger.info("✅ Démarrage terminé.")
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("❌ ERREUR : DISCORD_TOKEN non défini !")
-        logger.error("DISCORD_TOKEN non défini")
+        print("❌ ERREUR : DISCORD_TOKEN non défini")
     else:
         bot.run(TOKEN)
