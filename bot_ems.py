@@ -108,7 +108,6 @@ async def get_dossier_personnel(prenom: str, nom: str) -> Optional[dict]:
             return dict(row) if row else None
 
 async def search_dossiers_personnel(query: str, limit: int = 25) -> List[dict]:
-    """Recherche par prénom ou nom (contient)"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -119,7 +118,6 @@ async def search_dossiers_personnel(query: str, limit: int = 25) -> List[dict]:
             return [dict(r) for r in rows]
 
 async def get_dossier_complet(identifiant: str) -> Optional[dict]:
-    """Cherche par nom complet (prenom + nom) ou par nom seul"""
     parts = identifiant.strip().split()
     if len(parts) >= 2:
         prenom = parts[0]
@@ -1546,6 +1544,13 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, 
         inline=False
     )
 
+    # === NOUVEAU : AJOUT DES COMPATIBILITÉS DE DON ET DE RÉCEPTION ===
+    embed_final.add_field(
+        name="🩸 Compatibilités sanguines",
+        value=f"**Peut donner à :** {donneur_pour}\n**Peut recevoir de :** {receveur_de}",
+        inline=False
+    )
+
     # Ajouter l'historique des interventions (5 dernières)
     interventions = await get_interventions_for_patient(prenom, nom, 5)
     if interventions:
@@ -1741,8 +1746,6 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 # ---------- DÉMARRAGE ----------
-# Supprimer GUILD_IDS, on synchronise tout en global
-
 @bot.event
 async def on_ready():
     await init_db()
@@ -1751,6 +1754,16 @@ async def on_ready():
     print(f"📋 Le bot est sur {len(bot.guilds)} serveur(s) :")
     for guild in bot.guilds:
         print(f"   - {guild.name} (ID: {guild.id})")
+
+    # ÉTAPE DE NETTOYAGE : Supprimer les anciennes commandes spécifiques aux serveurs pour éviter les doublons
+    print("🧹 Nettoyage des anciennes commandes spécifiques aux serveurs...")
+    for guild in bot.guilds:
+        try:
+            bot.tree.clear_commands(guild=guild)
+            await bot.tree.sync(guild=guild)
+            print(f"   ✅ Commandes nettoyées pour le serveur {guild.name}")
+        except Exception as e:
+            print(f"   ⚠️ Erreur lors du nettoyage pour {guild.name} : {e}")
 
     # Synchronisation GLOBALE (tous les serveurs)
     try:
