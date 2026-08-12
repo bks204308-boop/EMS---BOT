@@ -5,6 +5,7 @@ import random
 import textwrap
 import traceback
 import asyncio
+import socket  # AJOUTÉ pour capturer les erreurs de réseau
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -82,7 +83,7 @@ async def init_db():
                     )
                 """)
                 print("✅ Connexion à la base de données établie et tables créées.")
-                return # On sort de la fonction si tout est bon
+                return
                 
         except Exception as e:
             print(f"⚠️ Tentative {attempt}/{retries} de connexion à la DB échouée : {e}")
@@ -91,16 +92,29 @@ async def init_db():
                 raise e
             await asyncio.sleep(delay)
 
-# ---------------------------------------------------------
-# AJOUT DE SÉCURITÉ : Vérifie que le pool est créé avant usage
-# ---------------------------------------------------------
 async def ensure_db_pool():
     """Vérifie si le pool existe, et le crée immédiatement si ce n'est pas le cas."""
     global db_pool
     if db_pool is None:
         await create_db_pool()
 
-# ------- FONCTIONS D'ACCÈS (Refaites avec le Pool) -------
+# -------------------------------------------------------------
+# NOUVEAU : Une fonction générique pour réessayer en cas d'erreur réseau
+# -------------------------------------------------------------
+async def db_execute_with_retry(db_func, *args, **kwargs):
+    """Exécute une fonction de DB et réessaie 3 fois si le réseau est lent (socket.gaierror)."""
+    retries = 3
+    delay = 2
+    for attempt in range(1, retries + 1):
+        try:
+            return await db_func(*args, **kwargs)
+        except (socket.gaierror, asyncpg.exceptions.CannotConnectNowError) as e:
+            print(f"⚠️ Erreur réseau (tentative {attempt}/{retries}) : {e}")
+            if attempt == retries:
+                raise e
+            await asyncio.sleep(delay)
+
+# ------- FONCTIONS D'ACCÈS (Sécurisées contre les erreurs réseau) -------
 async def save_dossier_personnel(
     prenom: str,
     nom: str,
@@ -110,65 +124,75 @@ async def save_dossier_personnel(
     contact_urgence: str,
     created_by: int,
 ):
-    await ensure_db_pool() # SÉCURITÉ
-    async with db_pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO dossiers_personnel (prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT (prenom, nom) DO UPDATE SET
-                age = EXCLUDED.age,
-                groupe_sanguin = EXCLUDED.groupe_sanguin,
-                allergies = EXCLUDED.allergies,
-                contact_urgence = EXCLUDED.contact_urgence,
-                updated_at = EXCLUDED.updated_at
-        """, prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by,
-           datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat())
+    await ensure_db_pool()
+    async def _save():
+        async with db_pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO dossiers_personnel (prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (prenom, nom) DO UPDATE SET
+                    age = EXCLUDED.age,
+                    groupe_sanguin = EXCLUDED.groupe_sanguin,
+                    allergies = EXCLUDED.allergies,
+                    contact_urgence = EXCLUDED.contact_urgence,
+                    updated_at = EXCLUDED.updated_at
+            """, prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by,
+               datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat())
+    await db_execute_with_retry(_save)
 
 async def get_dossier_personnel(prenom: str, nom: str) -> Optional[dict]:
-    await ensure_db_pool() # SÉCURITÉ
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM dossiers_personnel WHERE prenom = $1 AND nom = $2",
-            prenom, nom
-        )
-        return dict(row) if row else None
+    await ensure_db_pool()
+    async def _get():
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM dossiers_personnel WHERE prenom = $1 AND nom = $2",
+                prenom, nom
+            )
+            return dict(row) if row else None
+    return await db_execute_with_retry(_get)
 
 async def search_dossiers_personnel(query: str, limit: int = 25) -> List[dict]:
-    await ensure_db_pool() # SÉCURITÉ
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM dossiers_personnel WHERE prenom ILIKE $1 OR nom ILIKE $1 ORDER BY nom, prenom LIMIT $2",
-            f"%{query}%", limit
-        )
-        return [dict(row) for row in rows]
+    await ensure_db_pool()
+    async def _search():
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM dossiers_personnel WHERE prenom ILIKE $1 OR nom ILIKE $1 ORDER BY nom, prenom LIMIT $2",
+                f"%{query}%", limit
+            )
+            return [dict(row) for row in rows]
+    return await db_execute_with_retry(_search)
 
 async def get_dossier_complet(identifiant: str) -> Optional[dict]:
     parts = identifiant.strip().split()
     if len(parts) >= 2:
         prenom = parts[0]
         nom = " ".join(parts[1:])
-        dossier = await get_dossier_personnel(prenom, nom)
+        dossier = await get_dossier_personnel(prenom, nom) # Cette fonction a déjà ses propres retries
         if dossier:
             return dossier
-    resultats = await search_dossiers_personnel(identifiant, 1)
+    resultats = await search_dossiers_personnel(identifiant, 1) # Cette fonction a déjà ses propres retries
     return resultats[0] if resultats else None
 
 async def list_all_personnel(limit: int = 50) -> List[dict]:
-    await ensure_db_pool() # SÉCURITÉ
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM dossiers_personnel ORDER BY nom, prenom LIMIT $1", limit
-        )
-        return [dict(row) for row in rows]
+    await ensure_db_pool()
+    async def _list():
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM dossiers_personnel ORDER BY nom, prenom LIMIT $1", limit
+            )
+            return [dict(row) for row in rows]
+    return await db_execute_with_retry(_list)
 
 async def delete_dossier_personnel(prenom: str, nom: str) -> bool:
-    await ensure_db_pool() # SÉCURITÉ
-    async with db_pool.acquire() as conn:
-        result = await conn.execute(
-            "DELETE FROM dossiers_personnel WHERE prenom = $1 AND nom = $2",
-            prenom, nom
-        )
-        return result != "DELETE 0"
+    await ensure_db_pool()
+    async def _delete():
+        async with db_pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM dossiers_personnel WHERE prenom = $1 AND nom = $2",
+                prenom, nom
+            )
+            return result != "DELETE 0"
+    return await db_execute_with_retry(_delete)
 
 # Interventions
 async def save_dossier_intervention(
@@ -182,46 +206,56 @@ async def save_dossier_intervention(
     created_by: int,
     created_by_name: str,
 ) -> int:
-    await ensure_db_pool() # SÉCURITÉ
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            INSERT INTO dossiers_intervention (patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture, created_by, created_by_name, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            RETURNING id
-        """, patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture,
-           created_by, created_by_name, datetime.now(timezone.utc).isoformat())
-        return row["id"]
+    await ensure_db_pool()
+    async def _save_inter():
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO dossiers_intervention (patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture, created_by, created_by_name, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING id
+            """, patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture,
+               created_by, created_by_name, datetime.now(timezone.utc).isoformat())
+            return row["id"]
+    return await db_execute_with_retry(_save_inter)
 
 async def get_interventions_for_patient(prenom: str, nom: str, limit: int = 5) -> List[dict]:
-    await ensure_db_pool() # SÉCURITÉ
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM dossiers_intervention WHERE patient_prenom = $1 AND patient_nom = $2 ORDER BY id DESC LIMIT $3",
-            prenom, nom, limit
-        )
-        return [dict(row) for row in rows]
+    await ensure_db_pool()
+    async def _get_inter():
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM dossiers_intervention WHERE patient_prenom = $1 AND patient_nom = $2 ORDER BY id DESC LIMIT $3",
+                prenom, nom, limit
+            )
+            return [dict(row) for row in rows]
+    return await db_execute_with_retry(_get_inter)
 
 async def list_recent_interventions(limit: int = 10) -> List[dict]:
-    await ensure_db_pool() # SÉCURITÉ
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT $1", limit
-        )
-        return [dict(row) for row in rows]
+    await ensure_db_pool()
+    async def _list_inter():
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT $1", limit
+            )
+            return [dict(row) for row in rows]
+    return await db_execute_with_retry(_list_inter)
 
 async def delete_intervention(record_id: int) -> bool:
-    await ensure_db_pool() # SÉCURITÉ
-    async with db_pool.acquire() as conn:
-        result = await conn.execute("DELETE FROM dossiers_intervention WHERE id = $1", record_id)
-        return result != "DELETE 0"
+    await ensure_db_pool()
+    async def _del_inter():
+        async with db_pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM dossiers_intervention WHERE id = $1", record_id)
+            return result != "DELETE 0"
+    return await db_execute_with_retry(_del_inter)
 
 async def update_statut_facture(record_id: int, statut: str):
-    await ensure_db_pool() # SÉCURITÉ
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE dossiers_intervention SET statut_facture = $1 WHERE id = $2",
-            statut, record_id
-        )
+    await ensure_db_pool()
+    async def _update():
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE dossiers_intervention SET statut_facture = $1 WHERE id = $2",
+                statut, record_id
+            )
+    await db_execute_with_retry(_update)
 
 
 # ---------- EXPORT PDF ----------
