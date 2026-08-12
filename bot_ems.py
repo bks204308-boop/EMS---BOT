@@ -1750,34 +1750,32 @@ async def triage(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ZoneView(), file=file, ephemeral=True)
 
 # ---------- DÉMARRAGE ----------
-GUILD_IDS = [1531443088151543858, 1416761561749651556]  # Remplace par tes IDs
+# Supprimer GUILD_IDS, on synchronise tout en global
 
 @bot.event
 async def on_ready():
     await init_db()
     logger.info(f"✅ Connecté en tant que {bot.user} (ID: {bot.user.id})")
     print(f"✅ Connecté en tant que {bot.user}")
+    print(f"📋 Le bot est sur {len(bot.guilds)} serveur(s) :")
+    for guild in bot.guilds:
+        print(f"   - {guild.name} (ID: {guild.id})")
 
-    # Supprimer les commandes globales pour éviter les doublons
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync(guild=None)
-    print("✅ Commandes globales supprimées")
+    # Synchronisation GLOBALE (tous les serveurs)
+    try:
+        await bot.tree.sync()
+        print("✅ Commandes globales synchronisées")
+    except Exception as e:
+        print(f"❌ Erreur sync globale : {e}")
 
-    # Synchroniser uniquement sur les guildes spécifiées
-    for guild_id in GUILD_IDS:
-        try:
-            guild = bot.get_guild(guild_id)
-            if guild:
-                bot.tree.copy_global_to(guild=guild)
-                await bot.tree.sync(guild=guild)
-                logger.info(f"✅ Commandes synchronisées sur : {guild.name}")
-                print(f"✅ Commandes synchronisées sur : {guild.name}")
-            else:
-                logger.warning(f"⚠️ Serveur {guild_id} non trouvé")
-                print(f"⚠️ Serveur {guild_id} non trouvé")
-        except Exception as e:
-            logger.error(f"❌ Erreur sur {guild_id} : {e}")
-            print(f"❌ Erreur sur {guild_id} : {e}")
+    # Vérifier combien de commandes sont enregistrées
+    try:
+        cmds = await bot.tree.fetch_commands()
+        print(f"📋 {len(cmds)} commandes disponibles globalement :")
+        for cmd in cmds:
+            print(f"   - /{cmd.name}")
+    except Exception as e:
+        print(f"❌ Erreur fetch_commands : {e}")
 
     print("🚀 Bot prêt !")
     logger.info("✅ Démarrage terminé.")
