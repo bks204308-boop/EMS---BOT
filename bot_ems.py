@@ -8,7 +8,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional
 
-import aiosqlite
+import asyncpg
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -16,7 +16,8 @@ from fpdf import FPDF
 from PIL import Image, ImageDraw
 
 TOKEN = os.getenv("DISCORD_TOKEN")
-DB_PATH = os.getenv("BOT_DB_PATH", "bot_data.db")
+DATABASE_URL = os.getenv("DATABASE_URL")  # La connexion à PostgreSQL
+
 logger = logging.getLogger("rp_medical_bot")
 logging.basicConfig(level=logging.INFO)
 
@@ -24,45 +25,50 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ---------- BASE DE DONNÉES ----------
-async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS dossiers_personnel (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                prenom TEXT,
-                nom TEXT,
-                age TEXT,
-                groupe_sanguin TEXT,
-                allergies TEXT,
-                contact_urgence TEXT,
-                created_by INTEGER,
-                created_at TEXT,
-                updated_at TEXT,
-                UNIQUE(prenom, nom)
-            )
-            """
-        )
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS dossiers_intervention (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                patient_prenom TEXT,
-                patient_nom TEXT,
-                blessure TEXT,
-                soins TEXT,
-                transport TEXT,
-                facture TEXT,
-                statut_facture TEXT,
-                created_by INTEGER,
-                created_by_name TEXT,
-                created_at TEXT
-            )
-            """
-        )
-        await db.commit()
+# ---------- POOL DE CONNEXION & BASE DE DONNÉES ----------
+class DatabasePool:
+    def __init__(self):
+        self.pool = None
 
+    async def init_pool(self):
+        if not self.pool:
+            self.pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
+            # Création des tables si elles n'existent pas
+            async with self.pool.acquire() as conn:
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS dossiers_personnel (
+                        id SERIAL PRIMARY KEY,
+                        prenom TEXT,
+                        nom TEXT,
+                        age TEXT,
+                        groupe_sanguin TEXT,
+                        allergies TEXT,
+                        contact_urgence TEXT,
+                        created_by BIGINT,
+                        created_at TEXT,
+                        updated_at TEXT,
+                        UNIQUE(prenom, nom)
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS dossiers_intervention (
+                        id SERIAL PRIMARY KEY,
+                        patient_prenom TEXT,
+                        patient_nom TEXT,
+                        blessure TEXT,
+                        soins TEXT,
+                        transport TEXT,
+                        facture TEXT,
+                        statut_facture TEXT,
+                        created_by BIGINT,
+                        created_by_name TEXT,
+                        created_at TEXT
+                    )
+                """)
+
+db = DatabasePool()
+
+# ---------- FONCTIONS DE BASE DE DONNÉES (ASYNC / POSTGRES) ----------
 async def save_dossier_personnel(
     prenom: str,
     nom: str,
@@ -72,50 +78,27 @@ async def save_dossier_personnel(
     contact_urgence: str,
     created_by: int,
 ):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            """
+    async with db.pool.acquire() as conn:
+        await conn.execute("""
             INSERT INTO dossiers_personnel (prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT(prenom, nom) DO UPDATE SET
-                age=excluded.age,
-                groupe_sanguin=excluded.groupe_sanguin,
-                allergies=excluded.allergies,
-                contact_urgence=excluded.contact_urgence,
-                updated_at=excluded.updated_at
-            """,
-            (
-                prenom,
-                nom,
-                age,
-                groupe_sanguin,
-                allergies,
-                contact_urgence,
-                created_by,
-                datetime.now(timezone.utc).isoformat(),
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        await db.commit()
+                age=EXCLUDED.age,
+                groupe_sanguin=EXCLUDED.groupe_sanguin,
+                allergies=EXCLUDED.allergies,
+                contact_urgence=EXCLUDED.contact_urgence,
+                updated_at=EXCLUDED.updated_at
+        """, prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by, datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat())
 
 async def get_dossier_personnel(prenom: str, nom: str) -> Optional[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_personnel WHERE prenom = ? AND nom = ?", (prenom, nom)
-        ) as cursor:
-            row = await cursor.fetchone()
-            return dict(row) if row else None
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM dossiers_personnel WHERE prenom = $1 AND nom = $2", prenom, nom)
+        return dict(row) if row else None
 
 async def search_dossiers_personnel(query: str, limit: int = 25) -> List[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_personnel WHERE prenom LIKE ? OR nom LIKE ? ORDER BY nom, prenom LIMIT ?",
-            (f"%{query}%", f"%{query}%", limit),
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+    async with db.pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM dossiers_personnel WHERE prenom ILIKE $1 OR nom ILIKE $1 ORDER BY nom, prenom LIMIT $2", f"%{query}%", limit)
+        return [dict(r) for r in rows]
 
 async def get_dossier_complet(identifiant: str) -> Optional[dict]:
     parts = identifiant.strip().split()
@@ -129,21 +112,14 @@ async def get_dossier_complet(identifiant: str) -> Optional[dict]:
     return resultats[0] if resultats else None
 
 async def list_all_personnel(limit: int = 50) -> List[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_personnel ORDER BY nom, prenom LIMIT ?", (limit,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+    async with db.pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM dossiers_personnel ORDER BY nom, prenom LIMIT $1", limit)
+        return [dict(r) for r in rows]
 
 async def delete_dossier_personnel(prenom: str, nom: str) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "DELETE FROM dossiers_personnel WHERE prenom = ? AND nom = ?", (prenom, nom)
-        )
-        await db.commit()
-        return cursor.rowcount > 0
+    async with db.pool.acquire() as conn:
+        result = await conn.execute("DELETE FROM dossiers_personnel WHERE prenom = $1 AND nom = $2", prenom, nom)
+        return result == "DELETE 1"
 
 async def save_dossier_intervention(
     patient_prenom: str,
@@ -156,60 +132,32 @@ async def save_dossier_intervention(
     created_by: int,
     created_by_name: str,
 ) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            """
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow("""
             INSERT INTO dossiers_intervention (patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture, created_by, created_by_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                patient_prenom,
-                patient_nom,
-                blessure,
-                soins,
-                transport,
-                facture,
-                statut_facture,
-                created_by,
-                created_by_name,
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        await db.commit()
-        return cursor.lastrowid
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id
+        """, patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture, created_by, created_by_name, datetime.now(timezone.utc).isoformat())
+        return row["id"]
 
 async def get_interventions_for_patient(prenom: str, nom: str, limit: int = 5) -> List[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_intervention WHERE patient_prenom = ? AND patient_nom = ? ORDER BY id DESC LIMIT ?",
-            (prenom, nom, limit),
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+    async with db.pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM dossiers_intervention WHERE patient_prenom = $1 AND patient_nom = $2 ORDER BY id DESC LIMIT $3", prenom, nom, limit)
+        return [dict(r) for r in rows]
 
 async def list_recent_interventions(limit: int = 10) -> List[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT ?", (limit,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+    async with db.pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT $1", limit)
+        return [dict(r) for r in rows]
 
 async def delete_intervention(record_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("DELETE FROM dossiers_intervention WHERE id = ?", (record_id,))
-        await db.commit()
-        return cursor.rowcount > 0
+    async with db.pool.acquire() as conn:
+        result = await conn.execute("DELETE FROM dossiers_intervention WHERE id = $1", record_id)
+        return result == "DELETE 1"
 
 async def update_statut_facture(record_id: int, statut: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE dossiers_intervention SET statut_facture = ? WHERE id = ?",
-            (statut, record_id),
-        )
-        await db.commit()
+    async with db.pool.acquire() as conn:
+        await conn.execute("UPDATE dossiers_intervention SET statut_facture = $1 WHERE id = $2", statut, record_id)
 
 # ---------- EXPORT PDF ----------
 COLOR_BLUE = (0, 102, 153)
@@ -646,7 +594,6 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
     age = discord.ui.TextInput(label="Âge", placeholder="Ex: 45")
     sexe = discord.ui.TextInput(label="Sexe [M / F]", placeholder="M ou F", max_length=1)
     date_visite = discord.ui.TextInput(label="Date de la visite", placeholder="JJ/MM/AAAA")
-    # medecin_ems RETIRÉ D'ICI (6 inputs -> 5 inputs)
 
     async def on_submit(self, interaction: discord.Interaction):
         data = {
@@ -659,7 +606,7 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
         next_view = NextStepView(DossierMedicalModal2(data), label="Étape 2/4 : Antécédents ➡️")
         await interaction.response.send_message("✅ **Étape 1/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-# ---------- FORMULAIRE : MODIFICATION (Réorganisé pour respecter la limite de 5 inputs) ----------
+# ---------- FORMULAIRE : MODIFICATION ----------
 _MODIF_LABELS = {
     "nouveau_prenom": "Prénom",
     "nouveau_nom": "Nom",
@@ -810,7 +757,6 @@ class DossierModifierModal2(discord.ui.Modal, title="Modification (2/6) - Nouvel
 class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/6) - Identification"):
     ancien_prenom = discord.ui.TextInput(label="Ancien Prénom", placeholder="Prénom actuel", required=True)
     ancien_nom = discord.ui.TextInput(label="Ancien Nom", placeholder="Nom actuel", required=True)
-    # Seulement 2 champs ici pour respecter la limite des 5 inputs !
 
     async def on_submit(self, interaction: discord.Interaction):
         data = {}
@@ -1546,7 +1492,7 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, 
 
     # === AFFICHER LE DOSSIER COMPLET (définitif) ===
     embed_final = discord.Embed(
-        title=f"🩸 Analyse sanguine terminée — {dossier_updated['prenom']} {dossier_updated['nom']}",
+        title=f"🩺 Dossier Médical — {dossier_updated['prenom']} {dossier_updated['nom']}",
         color=discord.Color.green()
     )
     embed_final.add_field(name="Âge", value=dossier_updated["age"] or "Non renseigné", inline=True)
@@ -1766,7 +1712,7 @@ async def triage(interaction: discord.Interaction):
 # ---------- DÉMARRAGE ----------
 @bot.event
 async def on_ready():
-    await init_db()
+    await db.init_pool()  # Initialisation de la base PostgreSQL
     logger.info(f"✅ Connecté en tant que {bot.user} (ID: {bot.user.id})")
     print(f"✅ Connecté en tant que {bot.user}")
     print(f"📋 Le bot est sur {len(bot.guilds)} serveur(s) :")
