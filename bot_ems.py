@@ -758,4 +758,811 @@ class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Ant
                 "allergies": self.allergies.value,
                 "maladies_chroniques": self.maladies_chroniques.value,
                 "traitements": self.traitements.value,
-                "antecedents_chirurgicaux":
+                "antecedents_chirurgicaux": self.antecedents_chirurgicaux.value,
+                "taille": self.taille.value,
+            }
+        )
+        next_view = NextStepView(DossierMedicalModal3(self.data), label="Étape 3/4 : Examen clinique ➡️")
+        await interaction.response.send_message(
+            "✅ **Étape 2/4 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
+        )
+
+class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Identité"):
+    nom = discord.ui.TextInput(label="Nom & prénom", placeholder="Ex: Jean Dupont")
+    age = discord.ui.TextInput(label="Âge", placeholder="Ex: 45")
+    sexe = discord.ui.TextInput(
+        label="Sexe [M / F]", placeholder="M ou F", max_length=1
+    )
+    date_visite = discord.ui.TextInput(
+        label="Date de la visite", placeholder="JJ/MM/AAAA"
+    )
+    medecin_ems = discord.ui.TextInput(
+        label="Médecin / EMS", placeholder="Nom du médecin ou service"
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        data = {
+            "nom": self.nom.value,
+            "age": self.age.value,
+            "sexe": self.sexe.value,
+            "date_visite": self.date_visite.value,
+            "medecin_ems": self.medecin_ems.value,
+        }
+        next_view = NextStepView(DossierMedicalModal2(data), label="Étape 2/4 : Antécédents ➡️")
+        await interaction.response.send_message(
+            "✅ **Étape 1/4 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
+        )
+
+# ---------- FORMULAIRE : MODIFICATION ----------
+_MODIF_LABELS = {
+    "nouveau_nom": "Nom & prénom",
+    "nouveau_age": "Âge",
+    "nouveau_sexe": "Sexe",
+    "nouvelle_date": "Date de la visite",
+    "nouveau_medecin": "Médecin / EMS",
+    "nouvelles_allergies": "Allergies",
+    "nouvelles_maladies": "Maladies chroniques",
+    "nouveaux_traitements": "Traitements",
+    "nouveaux_antecedents": "Antécédents chirurgicaux",
+    "nouvelle_taille": "Taille",
+    "nouveau_poids": "Poids",
+    "nouveau_groupe": "Groupe sanguin",
+    "nouveau_pouls": "Pouls",
+    "nouvelle_respiration": "Respiration",
+    "nouvelle_vision": "Vision",
+    "nouvelle_audition": "Audition",
+    "nouvelles_observations": "Observations",
+    "nouvelle_aptitude": "Aptitude",
+    "nouvelles_recommandations": "Recommandations",
+    "nouvelle_signature": "Signature",
+}
+
+async def _finaliser_modif_dossier(
+    interaction: discord.Interaction, ancien_nom: str, data: dict
+):
+    updates = []
+    for key, label in _MODIF_LABELS.items():
+        value = data.get(key)
+        if value:
+            suffix = (
+                " cm"
+                if key == "nouvelle_taille"
+                else (" kg" if key == "nouveau_poids" else "")
+            )
+            updates.append(f"**{label} :** {value}{suffix}")
+
+    embed = discord.Embed(
+        title="**__🩺 Modification du Dossier Médical__**",
+        description=f"**Ancien dossier :** {ancien_nom}",
+        color=discord.Color.gold(),
+    )
+    if updates:
+        embed.add_field(
+            name="**Modifications effectuées**",
+            value="\n".join(updates),
+            inline=False,
+        )
+    else:
+        embed.add_field(
+            name="Aucune modification",
+            value="Aucun champ n'a été modifié.",
+            inline=False,
+        )
+    embed.set_footer(text=f"Modifié par {interaction.user.display_name}")
+    await interaction.response.send_message(embed=embed)
+
+class DossierModifierModal5(discord.ui.Modal, title="Modification (5/5) - Signature"):
+    nouvelle_signature = discord.ui.TextInput(
+        label="Nouvelle Signature", placeholder="Nouvelle signature", required=False
+    )
+
+    def __init__(self, ancien_nom: str, data: dict):
+        super().__init__()
+        self.ancien_nom = ancien_nom
+        self.data = data
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.data["nouvelle_signature"] = self.nouvelle_signature.value
+        await _finaliser_modif_dossier(interaction, self.ancien_nom, self.data)
+
+class DossierModifierModal4(discord.ui.Modal, title="Modification (4/5) - Conclusion"):
+    nouvelle_vision = discord.ui.TextInput(
+        label="Nouvelle Vision",
+        placeholder="Normale / Corrigée / Trouble",
+        required=False,
+    )
+    nouvelle_audition = discord.ui.TextInput(
+        label="Nouvelle Audition", placeholder="Normale / Diminuée", required=False
+    )
+    nouvelles_observations = discord.ui.TextInput(
+        label="Nouvelles Observations",
+        style=discord.TextStyle.paragraph,
+        required=False,
+    )
+    nouvelle_aptitude = discord.ui.TextInput(
+        label="Nouvelle Aptitude", placeholder="Patient apte / inapte", required=False
+    )
+    nouvelles_recommandations = discord.ui.TextInput(
+        label="Nouvelles Recommandations",
+        placeholder="Nouvelles recommandations",
+        required=False,
+    )
+
+    def __init__(self, ancien_nom: str, data: dict):
+        super().__init__()
+        self.ancien_nom = ancien_nom
+        self.data = data
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.data.update(
+            {
+                "nouvelle_vision": self.nouvelle_vision.value,
+                "nouvelle_audition": self.nouvelle_audition.value,
+                "nouvelles_observations": self.nouvelles_observations.value,
+                "nouvelle_aptitude": self.nouvelle_aptitude.value,
+                "nouvelles_recommandations": self.nouvelles_recommandations.value,
+            }
+        )
+        next_view = NextStepView(
+            DossierModifierModal5(self.ancien_nom, self.data),
+            label="Étape 5/5 : Signature ➡️",
+        )
+        await interaction.response.send_message(
+            "✅ **Étape 4/5 validée.** Cliquez ci-dessous pour terminer.",
+            view=next_view,
+            ephemeral=True,
+        )
+
+class DossierModifierModal3(discord.ui.Modal, title="Modification (3/5) - Examen clinique"):
+    nouvelle_taille = discord.ui.TextInput(
+        label="Nouvelle Taille", placeholder="cm", required=False
+    )
+    nouveau_poids = discord.ui.TextInput(
+        label="Nouveau Poids", placeholder="kg", required=False
+    )
+    nouveau_groupe = discord.ui.TextInput(
+        label="Nouveau Groupe sanguin", placeholder="Ex: A+", required=False
+    )
+    nouveau_pouls = discord.ui.TextInput(
+        label="Nouveau Pouls", placeholder="Normal / Rapide / Lent", required=False
+    )
+    nouvelle_respiration = discord.ui.TextInput(
+        label="Nouvelle Respiration", placeholder="Normale / Difficile", required=False
+    )
+
+    def __init__(self, ancien_nom: str, data: dict):
+        super().__init__()
+        self.ancien_nom = ancien_nom
+        self.data = data
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.data.update(
+            {
+                "nouvelle_taille": self.nouvelle_taille.value,
+                "nouveau_poids": self.nouveau_poids.value,
+                "nouveau_groupe": self.nouveau_groupe.value,
+                "nouveau_pouls": self.nouveau_pouls.value,
+                "nouvelle_respiration": self.nouvelle_respiration.value,
+            }
+        )
+        next_view = NextStepView(
+            DossierModifierModal4(self.ancien_nom, self.data),
+            label="Étape 4/5 : Conclusion ➡️",
+        )
+        await interaction.response.send_message(
+            "✅ **Étape 3/5 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
+        )
+
+class DossierModifierModal2(discord.ui.Modal, title="Modification (2/5) - Antécédents"):
+    nouveau_medecin = discord.ui.TextInput(
+        label="Nouveau Médecin / EMS", placeholder="Nouveau médecin", required=False
+    )
+    nouvelles_allergies = discord.ui.TextInput(
+        label="Nouvelles Allergies",
+        placeholder="Nouvelles allergies",
+        style=discord.TextStyle.paragraph,
+        required=False,
+    )
+    nouvelles_maladies = discord.ui.TextInput(
+        label="Nouvelles Maladies chroniques",
+        placeholder="Nouvelles maladies",
+        style=discord.TextStyle.paragraph,
+        required=False,
+    )
+    nouveaux_traitements = discord.ui.TextInput(
+        label="Nouveaux Traitements", placeholder="Nouveaux traitements", required=False
+    )
+    nouveaux_antecedents = discord.ui.TextInput(
+        label="Nouveaux Antécédents chirurgicaux",
+        placeholder="Nouveaux antécédents",
+        required=False,
+    )
+
+    def __init__(self, ancien_nom: str, data: dict):
+        super().__init__()
+        self.ancien_nom = ancien_nom
+        self.data = data
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.data.update(
+            {
+                "nouveau_medecin": self.nouveau_medecin.value,
+                "nouvelles_allergies": self.nouvelles_allergies.value,
+                "nouvelles_maladies": self.nouvelles_maladies.value,
+                "nouveaux_traitements": self.nouveaux_traitements.value,
+                "nouveaux_antecedents": self.nouveaux_antecedents.value,
+            }
+        )
+        next_view = NextStepView(
+            DossierModifierModal3(self.ancien_nom, self.data),
+            label="Étape 3/5 : Examen clinique ➡️",
+        )
+        await interaction.response.send_message(
+            "✅ **Étape 2/5 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
+        )
+
+class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/5) - Identité"):
+    ancien_nom = discord.ui.TextInput(
+        label="Ancien Nom & prénom",
+        placeholder="Nom actuel dans le dossier",
+        required=True,
+    )
+    nouveau_nom = discord.ui.TextInput(
+        label="Nouveau Nom & prénom", placeholder="Nouveau nom", required=False
+    )
+    nouveau_age = discord.ui.TextInput(
+        label="Nouvel Âge", placeholder="Nouvel âge", required=False
+    )
+    nouveau_sexe = discord.ui.TextInput(
+        label="Nouveau Sexe [M/F]", placeholder="M ou F", max_length=1, required=False
+    )
+    nouvelle_date = discord.ui.TextInput(
+        label="Nouvelle Date de visite", placeholder="JJ/MM/AAAA", required=False
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        data = {
+            "nouveau_nom": self.nouveau_nom.value,
+            "nouveau_age": self.nouveau_age.value,
+            "nouveau_sexe": self.nouveau_sexe.value,
+            "nouvelle_date": self.nouvelle_date.value,
+        }
+        next_view = NextStepView(
+            DossierModifierModal2(self.ancien_nom.value, data),
+            label="Étape 2/5 : Antécédents ➡️",
+        )
+        await interaction.response.send_message(
+            "✅ **Étape 1/5 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
+        )
+
+# ---------- FORMULAIRE : RAPPORT INTERVENTION EMS ----------
+async def _finaliser_rapport_intervention(
+    interaction: discord.Interaction, data: dict
+):
+    embed = discord.Embed(
+        title="**__Rapport d'Intervention EMS__**", color=discord.Color.red()
+    )
+    embed.add_field(name="**Date**", value=data["date"], inline=True)
+    embed.add_field(name="**Heure d'appel**", value=data["heure_appel"], inline=True)
+    embed.add_field(
+        name="**Heure d'arrivée sur les lieux**",
+        value=data["heure_arrivee"],
+        inline=True,
+    )
+    embed.add_field(
+        name="**Heure de fin d'intervention**", value=data["heure_fin"], inline=True
+    )
+    embed.add_field(
+        name="**Nom(s) du/des EMS présent(s)**", value=data["ems_noms"], inline=True
+    )
+    embed.add_field(
+        name="\n```Lieu de l'intervention```", value=f"-> {data['lieu']}", inline=False
+    )
+    embed.add_field(
+        name="\n```Informations sur le patient```", value="\u200b", inline=False
+    )
+    embed.add_field(name="Nom RP", value=data["patient_nom"], inline=True)
+    embed.add_field(name="Sexe / Âge", value=data["patient_sexe_age"], inline=True)
+    embed.add_field(
+        name="État à l'arrivée", value=data["patient_etat"], inline=False
+    )
+
+    dossier = await get_dossier_personnel(data["patient_nom"])
+    if dossier:
+        embed.add_field(
+            name="⚠️ Rappel dossier personnel",
+            value=f"Groupe sanguin : **{dossier['groupe_sanguin'] or 'Inconnu'}**\nAllergies : **{dossier['allergies'] or 'Aucune'}**",
+            inline=False,
+        )
+
+    embed.add_field(name="\n```Procédure effectuée```", value="\u200b", inline=False)
+    embed.add_field(
+        name="Vérification des signes vitaux",
+        value=data["signes_vitaux"],
+        inline=True,
+    )
+    embed.add_field(
+        name="Premiers soins", value=data["premiers_soins"] or "Aucun", inline=True
+    )
+    embed.add_field(
+        name="Stabilisation", value=data["stabilisation"] or "Aucune", inline=True
+    )
+    embed.add_field(name="Transport", value=data["transport"], inline=True)
+    embed.add_field(
+        name="Destination", value=data["destination"] or "Non spécifiée", inline=True
+    )
+    embed.add_field(
+        name="\n```Observations complémentaires```",
+        value=data["observations"] or "Aucune observation",
+        inline=False,
+    )
+    embed.add_field(
+        name="\n```Conclusion de l'intervention```",
+        value=data["conclusion"],
+        inline=False,
+    )
+    embed.add_field(
+        name="\n**Signature du médecin / secouriste**",
+        value=data["signature"] or "Non signé",
+        inline=False,
+    )
+    embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
+
+    record_id = await save_dossier_intervention(
+        patient_name=data["patient_nom"],
+        blessure=data["patient_etat"],
+        soins=f"Soins : {data['premiers_soins'] or 'Aucun'}\nStabilisation : {data['stabilisation'] or 'Aucune'}",
+        transport=f"{data['transport']} -> {data['destination'] or 'N/A'}",
+        facture="",
+        statut_facture="",
+        created_by=interaction.user.id,
+        created_by_name=interaction.user.display_name,
+    )
+
+    view = ExportPDFView(
+        doc_type="rapport_intervention",
+        data=data,
+        filename=f"rapport_intervention_{record_id}.pdf",
+        footer=interaction.user.display_name,
+        record_id=record_id,
+    )
+    await interaction.response.send_message(embed=embed, view=view)
+
+class RapportInterventionModal4(discord.ui.Modal, title="Rapport EMS (4/4) - Conclusion"):
+    conclusion = discord.ui.TextInput(
+        label="Conclusion de l'intervention",
+        placeholder="Patient stabilisé / transporté / décédé malgré les soins",
+        style=discord.TextStyle.paragraph,
+    )
+    signature = discord.ui.TextInput(
+        label="Signature du médecin / secouriste", placeholder="Signature", required=False
+    )
+
+    def __init__(self, data: dict):
+        super().__init__()
+        self.data = data
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.data.update(
+            {
+                "conclusion": self.conclusion.value,
+                "signature": self.signature.value,
+            }
+        )
+        await _finaliser_rapport_intervention(interaction, self.data)
+
+class RapportInterventionModal3(discord.ui.Modal, title="Rapport EMS (3/4) - Procédure"):
+    premiers_soins = discord.ui.TextInput(
+        label="Premiers soins",
+        placeholder="Massage cardiaque / Garrot / Pansement, etc.",
+        style=discord.TextStyle.paragraph,
+        required=False,
+    )
+    stabilisation = discord.ui.TextInput(
+        label="Stabilisation",
+        placeholder="Oxygène / Médicaments / Défibrillateur",
+        style=discord.TextStyle.paragraph,
+        required=False,
+    )
+    transport = discord.ui.TextInput(label="Transport", placeholder="Oui / Non")
+    destination = discord.ui.TextInput(
+        label="Destination",
+        placeholder="Central EMS / Hôpital / Autre",
+        required=False,
+    )
+    observations = discord.ui.TextInput(
+        label="Observations complémentaires",
+        style=discord.TextStyle.paragraph,
+        placeholder="Ex: Patient victime d'un accident, contusions, état stabilisé.",
+        required=False,
+    )
+
+    def __init__(self, data: dict):
+        super().__init__()
+        self.data = data
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.data.update(
+            {
+                "premiers_soins": self.premiers_soins.value,
+                "stabilisation": self.stabilisation.value,
+                "transport": self.transport.value,
+                "destination": self.destination.value,
+                "observations": self.observations.value,
+            }
+        )
+        next_view = NextStepView(RapportInterventionModal4(self.data), label="Étape 4/4 : Conclusion ➡️")
+        await interaction.response.send_message(
+            "✅ **Étape 3/4 validée.** Cliquez ci-dessous pour terminer.",
+            view=next_view,
+            ephemeral=True,
+        )
+
+class RapportInterventionModal2(discord.ui.Modal, title="Rapport EMS (2/4) - Patient"):
+    lieu = discord.ui.TextInput(
+        label="Lieu de l'intervention",
+        placeholder="Adresse ou lieu précis",
+        style=discord.TextStyle.paragraph,
+    )
+    patient_nom = discord.ui.TextInput(label="Nom RP", placeholder="Nom et prénom")
+    patient_sexe_age = discord.ui.TextInput(
+        label="Sexe / Âge", placeholder="M/F, âge"
+    )
+    patient_etat = discord.ui.TextInput(
+        label="État à l'arrivée",
+        placeholder="Inconscient / Conscient mais blessé / Hémorragie, etc.",
+        style=discord.TextStyle.paragraph,
+    )
+    signes_vitaux = discord.ui.TextInput(
+        label="Vérification des signes vitaux", placeholder="Oui / Non"
+    )
+
+    def __init__(self, data: dict, patient_name: str = None):
+        super().__init__()
+        self.data = data
+        if patient_name:
+            self.patient_nom.default = patient_name
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.data.update(
+            {
+                "lieu": self.lieu.value,
+                "patient_nom": self.patient_nom.value,
+                "patient_sexe_age": self.patient_sexe_age.value,
+                "patient_etat": self.patient_etat.value,
+                "signes_vitaux": self.signes_vitaux.value,
+            }
+        )
+        next_view = NextStepView(RapportInterventionModal3(self.data), label="Étape 3/4 : Procédure ➡️")
+        await interaction.response.send_message(
+            "✅ **Étape 2/4 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
+        )
+
+class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Horaires"):
+    date = discord.ui.TextInput(label="Date", placeholder="JJ/MM/AAAA")
+    heure_appel = discord.ui.TextInput(label="Heure d'appel", placeholder="HH:MM")
+    heure_arrivee = discord.ui.TextInput(
+        label="Heure d'arrivée sur les lieux", placeholder="HH:MM"
+    )
+    heure_fin = discord.ui.TextInput(
+        label="Heure de fin d'intervention", placeholder="HH:MM"
+    )
+    ems_noms = discord.ui.TextInput(
+        label="Nom(s) du/des EMS présent(s)", placeholder="Nom RP"
+    )
+
+    def __init__(self, patient_name: str = None):
+        super().__init__()
+        self.patient_name = patient_name
+
+    async def on_submit(self, interaction: discord.Interaction):
+        data = {
+            "date": self.date.value,
+            "heure_appel": self.heure_appel.value,
+            "heure_arrivee": self.heure_arrivee.value,
+            "heure_fin": self.heure_fin.value,
+            "ems_noms": self.ems_noms.value,
+        }
+        next_view = NextStepView(
+            RapportInterventionModal2(data, patient_name=self.patient_name),
+            label="Étape 2/4 : Patient ➡️",
+        )
+        await interaction.response.send_message(
+            "✅ **Étape 1/4 validée.** Cliquez ci-dessous pour continuer.",
+            view=next_view,
+            ephemeral=True,
+        )
+
+# ---------- FACTURATION ET CATEGORIES ----------
+FACTURATION_CATEGORIES = {
+    "soins_base": {
+        "label": "💉 Soins de base",
+        "items": {
+            "consultation": {"label": "Consultation / Diagnostic", "prix": 500},
+            "petit_soin": {"label": "Soin léger (égratignure, hématome)", "prix": 550},
+            "soin_classique": {"label": "Soin classique (plaie modérée, brûlure)", "prix": 1000},
+            "soin_lourd": {"label": "Soin lourd (fracture, blessure par balle)", "prix": 1600},
+        },
+    },
+    "interventions": {
+        "label": "🏥 Interventions & Urgences",
+        "items": {
+            "intervention_urgente": {"label": "Intervention urgente sur site", "prix": 1500},
+            "extraction_dangereuse": {"label": "Extraction en zone dangereuse (fusillade)", "prix": 1800},
+            "reanimation_simple": {"label": "Réanimation sur place", "prix": 1500},
+            "reanimation_dangereuse": {"label": "Réanimation en zone à haut risque", "prix": 10000},
+        },
+    },
+    "transport": {
+        "label": "🚑 Transport médical",
+        "items": {
+            "transport_standard": {"label": "Transport ambulance (ville / hôpital)", "prix": 1250},
+            "transport_urgence": {"label": "Transport d'urgence / Zone à risque", "prix": 1800},
+            "transport_longue_distance": {"label": "Transport longue distance / Hors ville", "prix": 2400},
+            "escorte_medicale": {"label": "Escorte médicale (convoi / VIP)", "prix": 2700},
+            "transport_morgue": {"label": "Transport de corps (morgue)", "prix": 1500},
+        },
+    },
+    "visites_tests": {
+        "label": "🩺 Visites & Tests",
+        "items": {
+            "visite_standard": {"label": "Visite médicale standard", "prix": 1000},
+            "visite_approfondie": {"label": "Visite médicale approfondie", "prix": 1500},
+            "visite_professionnelle": {"label": "Visite d'aptitude professionnelle", "prix": 1800},
+            "test_ppa": {"label": "Test psychotechnique (PPA)", "prix": 2000},
+            "repassage_test": {"label": "Rattrapage test PPA", "prix": 1000},
+        },
+    },
+    "pharmacie_services": {
+        "label": "💊 Pharmacie & Services",
+        "items": {
+            "prescription": {"label": "Ordonnance / Prescription", "prix": 500},
+            "kit_soin": {"label": "Kit de soin / Bandages", "prix": 550},
+            "certificat_medical": {"label": "Certificat médical RP", "prix": 500},
+            "test_depistage": {"label": "Test alcool / drogue RP", "prix": 500},
+            "vaccin_standard": {"label": "Vaccin standard / Rappel", "prix": 600},
+            "vaccin_obligatoire": {"label": "Vaccination schéma complet", "prix": 1200},
+            "carnet_vaccination": {"label": "Carnet de vaccination RP", "prix": 300},
+        },
+    },
+    "maternite": {
+        "label": "👶 Maternité",
+        "items": {
+            "consultation_prenatale": {"label": "Consultation prénatale / Post-natale", "prix": 600},
+            "suivi_grossesse": {"label": "Suivi de grossesse complet", "prix": 2500},
+            "accouchement_standard": {"label": "Accouchement standard", "prix": 3000},
+            "accouchement_complication": {"label": "Accouchement complexe / Césarienne", "prix": 4500},
+        },
+    },
+    "fin_de_vie": {
+        "label": "⚰️ Fin de vie & Légale",
+        "items": {
+            "accompagnement_fin_vie": {"label": "Accompagnement & Soins palliatifs", "prix": 2000},
+            "constat_deces": {"label": "Constat de décès RP", "prix": 1000},
+        },
+    },
+    "assistance": {
+        "label": "🧑‍⚕️ Assistance & Dispositifs",
+        "items": {
+            "assistance_evenement": {"label": "Dispositif médical sur événement", "prix": 3000},
+            "presence_operation": {"label": "Assistance opération spéciale", "prix": 3500},
+            "support_zone_dangereuse": {"label": "Support en zone dangereuse", "prix": 5000},
+            "assistance_longue_duree": {"label": "Contrat d'assistance longue durée", "prix": 8000},
+        },
+    },
+}
+
+class FacturationSession:
+    def __init__(self):
+        self.total = 0
+        self.details: List[str] = []
+        self.patient_name: str = "Non renseigné"
+
+def build_facturation_embed(
+    session: FacturationSession, note: Optional[str] = None
+) -> discord.Embed:
+    embed = discord.Embed(title="🧾 Facturation EMS", color=discord.Color.green())
+    embed.add_field(name="Patient", value=session.patient_name, inline=False)
+    if session.details:
+        embed.add_field(
+            name="Soins ajoutés",
+            value="\n".join(f"• {d}" for d in session.details),
+            inline=False,
+        )
+        embed.add_field(
+            name="Total provisoire", value=f"**{session.total} $**", inline=False
+        )
+    else:
+        embed.description = "Aucun soin ajouté pour le moment."
+    if note:
+        embed.add_field(name="Étape actuelle", value=note, inline=False)
+    return embed
+
+class FacturationCategorySelect(discord.ui.Select):
+    def __init__(self, session: FacturationSession):
+        self.session = session
+        options = [
+            discord.SelectOption(label=cat["label"][:100], value=key)
+            for key, cat in FACTURATION_CATEGORIES.items()
+        ]
+        super().__init__(
+            placeholder="Choisis une catégorie de soins...", options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        cat_key = self.values[0]
+        note = f"Catégorie : {FACTURATION_CATEGORIES[cat_key]['label']}"
+        embed = build_facturation_embed(self.session, note=note)
+        view = FacturationItemView(self.session, cat_key)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class FacturationCategoryView(SafeView):
+    def __init__(self, session: FacturationSession):
+        super().__init__(timeout=180)
+        self.add_item(FacturationCategorySelect(session))
+
+class FacturationItemSelect(discord.ui.Select):
+    def __init__(self, session: FacturationSession, cat_key: str):
+        self.session = session
+        self.cat_key = cat_key
+        items = FACTURATION_CATEGORIES[cat_key]["items"]
+        options = [
+            discord.SelectOption(label=f"{v['label']} — {v['prix']} $", value=k)
+            for k, v in items.items()
+        ]
+        super().__init__(
+            placeholder="Sélectionne un soin...",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        key = self.values[0]
+        item = FACTURATION_CATEGORIES[self.cat_key]["items"][key]
+        await interaction.response.send_modal(
+            QuantityModal(self.session, key, item, self.cat_key)
+        )
+
+class QuantityModal(discord.ui.Modal, title="Quantité du soin"):
+    quantite = discord.ui.TextInput(
+        label="Combien de fois ?", placeholder="Ex: 2", default="1"
+    )
+
+    def __init__(
+        self,
+        session: FacturationSession,
+        item_key: str,
+        item_data: dict,
+        cat_key: str,
+    ):
+        super().__init__()
+        self.session = session
+        self.item_key = item_key
+        self.item_data = item_data
+        self.cat_key = cat_key
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            qte = int(self.quantite.value)
+            if qte < 1:
+                qte = 1
+            if qte > 99:
+                qte = 99
+        except ValueError:
+            qte = 1
+        cout_total = self.item_data["prix"] * qte
+        self.session.total += cout_total
+        self.session.details.append(
+            f"{qte}x {self.item_data['label']} — {cout_total} $"
+        )
+        embed = build_facturation_embed(self.session)
+        view = FacturationSummaryView(self.session)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class BackToCategoryButton(discord.ui.Button):
+    def __init__(self, session: FacturationSession):
+        super().__init__(
+            label="↩️ Changer de catégorie",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        self.session = session
+
+    async def callback(self, interaction: discord.Interaction):
+        embed = build_facturation_embed(self.session)
+        view = FacturationCategoryView(self.session)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class FacturationItemView(SafeView):
+    def __init__(self, session: FacturationSession, cat_key: str):
+        super().__init__(timeout=180)
+        self.add_item(FacturationItemSelect(session, cat_key))
+        self.add_item(BackToCategoryButton(session))
+
+class FacturationSummaryView(SafeView):
+    def __init__(self, session: FacturationSession):
+        super().__init__(timeout=180)
+        self.session = session
+
+    @discord.ui.button(
+        label="➕ Ajouter un autre soin", style=discord.ButtonStyle.secondary
+    )
+    async def add_more(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        embed = build_facturation_embed(self.session)
+        view = FacturationCategoryView(self.session)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(
+        label="✅ Terminer et facturer", style=discord.ButtonStyle.success
+    )
+    async def finish(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        detail_text = (
+            "\n".join(f"• {d}" for d in self.session.details)
+            or "Aucun soin sélectionné"
+        )
+        record_id = await save_dossier_intervention(
+            patient_name=self.session.patient_name,
+            blessure="Facturation soins",
+            soins=detail_text,
+            transport="",
+            facture=str(self.session.total),
+            statut_facture="En attente",
+            created_by=interaction.user.id,
+            created_by_name=interaction.user.display_name,
+        )
+        embed = discord.Embed(title="🧾 Facturation finale", color=discord.Color.gold())
+        embed.add_field(name="Patient", value=self.session.patient_name, inline=False)
+        embed.add_field(name="Soins effectués", value=detail_text, inline=False)
+        embed.add_field(
+            name="Total", value=f"**{self.session.total} $**", inline=False
+        )
+        embed.add_field(name="Statut de paiement", value="⏳ **En attente**", inline=False)
+        embed.set_footer(
+            text=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}"
+        )
+
+        final_view = FacturationFinalView(
+            patient_name=self.session.patient_name,
+            details=self.session.details,
+            total=self.session.total,
+            record_id=record_id,
+            footer=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}",
+        )
+        await interaction.response.edit_message(embed=embed, view=final_view)
+
+@bot.tree.command(
+    name="facturation",
+    description="Noter les soins effectués et calculer le prix total",
+)
+@app_commands.describe(patient="Nom du patient")
+async def facturation(interaction: discord.Interaction, patient: str):
+    session = FacturationSession()
+    session.patient_name = patient
+    dossier = await get_dossier_personnel(patient)
+    if dossier:
+        session.patient_name = dossier["nom"]
+    embed = build_facturation_embed(
+        session, note="Choisis une catégorie de soins pour commencer."
+    )
+    await interaction.response.send_message(
+        embed=embed, view=FacturationCategoryView(session)
+    )
+
+#
