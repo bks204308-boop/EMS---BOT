@@ -24,13 +24,26 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ---------- BASE DE DONNÉES ----------
+ :
+            resultats else None
+
+# ---------- BASE DE DONNÉES (PostgreSQL) ----------
+import asyncpg
+from asyncpg import Connection
+
+DATABASE_URL = os.getenv("DATABASE_URL")  # Railway fournit cette variable
+
+async def get_db_connection() -> Connection:
+    """Crée une connexion à la base PostgreSQL."""
+    return await asyncpg.connect(DATABASE_URL)
+
 async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            """
+    """Crée les tables si elles n'existent pas."""
+    conn = await get_db_connection()
+    try:
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS dossiers_personnel (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 prenom TEXT,
                 nom TEXT,
                 age TEXT,
@@ -42,12 +55,10 @@ async def init_db():
                 updated_at TEXT,
                 UNIQUE(prenom, nom)
             )
-            """
-        )
-        await db.execute(
-            """
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS dossiers_intervention (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_prenom TEXT,
                 patient_nom TEXT,
                 blessure TEXT,
@@ -59,9 +70,11 @@ async def init_db():
                 created_by_name TEXT,
                 created_at TEXT
             )
-            """
-        )
-        await db.commit()
+        """)
+    finally:
+        await conn.close()
+
+# ------- FONCTIONS D'ACCÈS -------
 
 async def save_dossier_personnel(
     prenom: str,
@@ -72,54 +85,45 @@ async def save_dossier_personnel(
     contact_urgence: str,
     created_by: int,
 ):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            """
+    conn = await get_db_connection()
+    try:
+        await conn.execute("""
             INSERT INTO dossiers_personnel (prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(prenom, nom) DO UPDATE SET
-                age=excluded.age,
-                groupe_sanguin=excluded.groupe_sanguin,
-                allergies=excluded.allergies,
-                contact_urgence=excluded.contact_urgence,
-                updated_at=excluded.updated_at
-            """,
-            (
-                prenom,
-                nom,
-                age,
-                groupe_sanguin,
-                allergies,
-                contact_urgence,
-                created_by,
-                datetime.now(timezone.utc).isoformat(),
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        await db.commit()
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (prenom, nom) DO UPDATE SET
+                age = EXCLUDED.age,
+                groupe_sanguin = EXCLUDED.groupe_sanguin,
+                allergies = EXCLUDED.allergies,
+                contact_urgence = EXCLUDED.contact_urgence,
+                updated_at = EXCLUDED.updated_at
+        """, prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by,
+           datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat())
+    finally:
+        await conn.close()
 
 async def get_dossier_personnel(prenom: str, nom: str) -> Optional[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_personnel WHERE prenom = ? AND nom = ?", (prenom, nom)
-        ) as cursor:
-            row = await cursor.fetchone()
-            return dict(row) if row else None
+    conn = await get_db_connection()
+    try:
+        row = await conn.fetchrow(
+            "SELECT * FROM dossiers_personnel WHERE prenom = $1 AND nom = $2",
+            prenom, nom
+        )
+        return dict(row) if row else None
+    finally:
+        await conn.close()
 
 async def search_dossiers_personnel(query: str, limit: int = 25) -> List[dict]:
-    """Recherche par prénom ou nom (contient)"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_personnel WHERE prenom LIKE ? OR nom LIKE ? ORDER BY nom, prenom LIMIT ?",
-            (f"%{query}%", f"%{query}%", limit),
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+    conn = await get_db_connection()
+    try:
+        rows = await conn.fetch(
+            "SELECT * FROM dossiers_personnel WHERE prenom ILIKE $1 OR nom ILIKE $1 ORDER BY nom, prenom LIMIT $2",
+            f"%{query}%", limit
+        )
+        return [dict(row) for row in rows]
+    finally:
+        await conn.close()
 
 async def get_dossier_complet(identifiant: str) -> Optional[dict]:
-    """Cherche par nom complet (prenom + nom) ou par nom seul"""
     parts = identifiant.strip().split()
     if len(parts) >= 2:
         prenom = parts[0]
@@ -131,22 +135,27 @@ async def get_dossier_complet(identifiant: str) -> Optional[dict]:
     return resultats[0] if resultats else None
 
 async def list_all_personnel(limit: int = 50) -> List[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_personnel ORDER BY nom, prenom LIMIT ?", (limit,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+    conn = await get_db_connection()
+    try:
+        rows = await conn.fetch(
+            "SELECT * FROM dossiers_personnel ORDER BY nom, prenom LIMIT $1", limit
+        )
+        return [dict(row) for row in rows]
+    finally:
+        await conn.close()
 
 async def delete_dossier_personnel(prenom: str, nom: str) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "DELETE FROM dossiers_personnel WHERE prenom = ? AND nom = ?", (prenom, nom)
+    conn = await get_db_connection()
+    try:
+        result = await conn.execute(
+            "DELETE FROM dossiers_personnel WHERE prenom = $1 AND nom = $2",
+            prenom, nom
         )
-        await db.commit()
-        return cursor.rowcount > 0
+        return result != "DELETE 0"
+    finally:
+        await conn.close()
 
+# Interventions
 async def save_dossier_intervention(
     patient_prenom: str,
     patient_nom: str,
@@ -158,60 +167,58 @@ async def save_dossier_intervention(
     created_by: int,
     created_by_name: str,
 ) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            """
+    conn = await get_db_connection()
+    try:
+        row = await conn.fetchrow("""
             INSERT INTO dossiers_intervention (patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture, created_by, created_by_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                patient_prenom,
-                patient_nom,
-                blessure,
-                soins,
-                transport,
-                facture,
-                statut_facture,
-                created_by,
-                created_by_name,
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        await db.commit()
-        return cursor.lastrowid
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id
+        """, patient_prenom, patient_nom, blessure, soins, transport, facture, statut_facture,
+           created_by, created_by_name, datetime.now(timezone.utc).isoformat())
+        return row["id"]
+    finally:
+        await conn.close()
 
 async def get_interventions_for_patient(prenom: str, nom: str, limit: int = 5) -> List[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_intervention WHERE patient_prenom = ? AND patient_nom = ? ORDER BY id DESC LIMIT ?",
-            (prenom, nom, limit),
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+    conn = await get_db_connection()
+    try:
+        rows = await conn.fetch(
+            "SELECT * FROM dossiers_intervention WHERE patient_prenom = $1 AND patient_nom = $2 ORDER BY id DESC LIMIT $3",
+            prenom, nom, limit
+        )
+        return [dict(row) for row in rows]
+    finally:
+        await conn.close()
 
 async def list_recent_interventions(limit: int = 10) -> List[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT ?", (limit,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+    conn = await get_db_connection()
+    try:
+        rows = await conn.fetch(
+            "SELECT * FROM dossiers_intervention ORDER BY id DESC LIMIT $1", limit
+        )
+        return [dict(row) for row in rows]
+    finally:
+        await conn.close()
 
 async def delete_intervention(record_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("DELETE FROM dossiers_intervention WHERE id = ?", (record_id,))
-        await db.commit()
-        return cursor.rowcount > 0
+    conn = await get_db_connection()
+    try:
+        result = await conn.execute("DELETE FROM dossiers_intervention WHERE id = $1", record_id)
+        return result != "DELETE 0"
+    finally:
+        await conn.close()
 
 async def update_statut_facture(record_id: int, statut: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE dossiers_intervention SET statut_facture = ? WHERE id = ?",
-            (statut, record_id),
+    conn = await get_db_connection()
+    try:
+        await conn.execute(
+            "UPDATE dossiers_intervention SET statut_facture = $1 WHERE id = $2",
+            statut, record_id
         )
-        await db.commit()
+    finally:
+        await conn.close()
+
+
 
 # ---------- EXPORT PDF ----------
 COLOR_BLUE = (0, 102, 153)
