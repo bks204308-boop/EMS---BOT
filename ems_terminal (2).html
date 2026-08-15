@@ -1,0 +1,1625 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EMS Terminal — Dossiers Médicaux RP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{
+  --bg:#0a121d;
+  --bg2:#0d1826;
+  --panel:#101d2e;
+  --panel2:#132236;
+  --border:#1d3149;
+  --border-soft:#182940;
+  --text:#e7eef6;
+  --muted:#7d92a8;
+  --muted2:#54697e;
+  --blue:#2f8fd1;
+  --blue-dim:#1c5a86;
+  --red:#c94848;
+  --red-dim:#7a2c2c;
+  --green:#3fa77a;
+  --green-dim:#245b45;
+  --amber:#d1a13a;
+  --amber-dim:#7a5f22;
+  --purple:#8b7bd8;
+  --radius:10px;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:
+    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(47,143,209,0.10), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 100% 0%, rgba(201,72,72,0.08), transparent 60%),
+    var(--bg);
+  color:var(--text);
+  font-family:'Inter',system-ui,sans-serif;
+  min-height:100vh;
+}
+::selection{background:var(--blue-dim);}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px;}
+
+/* ---------- Top bar : bandeau vitals ---------- */
+.vitals-strip{
+  height:3px;width:100%;
+  background:linear-gradient(90deg, var(--blue), var(--red), var(--blue), var(--amber), var(--blue));
+  background-size:400% 100%;
+  animation:vitalsflow 8s linear infinite;
+}
+@keyframes vitalsflow{0%{background-position:0% 0;}100%{background-position:400% 0;}}
+
+header.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 28px;border-bottom:1px solid var(--border-soft);
+  background:rgba(13,24,38,0.75);backdrop-filter:blur(6px);
+  position:sticky;top:0;z-index:40;
+}
+.brand{display:flex;align-items:center;gap:12px;}
+.brand-mark{
+  width:38px;height:38px;border-radius:9px;
+  background:linear-gradient(135deg,var(--blue),var(--blue-dim));
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Space Grotesk';font-weight:700;font-size:15px;color:#fff;
+  box-shadow:0 0 0 1px rgba(255,255,255,0.08), 0 6px 18px rgba(47,143,209,0.35);
+  flex-shrink:0;
+}
+.brand-text h1{font-family:'Space Grotesk';font-size:16px;margin:0;font-weight:600;letter-spacing:0.2px;}
+.brand-text p{margin:0;font-size:11.5px;color:var(--muted);font-family:'IBM Plex Mono';letter-spacing:0.3px;}
+.topbar-right{display:flex;align-items:center;gap:18px;}
+.clock{font-family:'IBM Plex Mono';font-size:12.5px;color:var(--muted);text-align:right;line-height:1.35;}
+.clock b{color:var(--text);}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;margin-right:6px;box-shadow:0 0 8px var(--green);animation:pulse 2s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
+
+/* ---------- Nav tabs ---------- */
+nav.tabs{
+  display:flex;gap:4px;padding:10px 24px 0 24px;overflow-x:auto;
+  border-bottom:1px solid var(--border-soft);
+}
+nav.tabs::-webkit-scrollbar{height:0;}
+.tab-btn{
+  font-family:'IBM Plex Mono';font-size:12px;font-weight:500;
+  background:none;border:none;color:var(--muted);
+  padding:10px 16px;cursor:pointer;white-space:nowrap;
+  border-bottom:2px solid transparent;transition:all .15s ease;
+  display:flex;align-items:center;gap:7px;
+}
+.tab-btn:hover{color:var(--text);}
+.tab-btn.active{color:var(--text);border-bottom-color:var(--blue);}
+.tab-dot{width:6px;height:6px;border-radius:2px;background:var(--muted2);flex-shrink:0;}
+.tab-btn.active .tab-dot{background:var(--blue);}
+.tab-btn[data-accent="red"].active{border-bottom-color:var(--red);}
+.tab-btn[data-accent="red"].active .tab-dot{background:var(--red);}
+.tab-btn[data-accent="green"].active{border-bottom-color:var(--green);}
+.tab-btn[data-accent="green"].active .tab-dot{background:var(--green);}
+.tab-btn[data-accent="amber"].active{border-bottom-color:var(--amber);}
+.tab-btn[data-accent="amber"].active .tab-dot{background:var(--amber);}
+.tab-btn[data-accent="purple"].active{border-bottom-color:var(--purple);}
+.tab-btn[data-accent="purple"].active .tab-dot{background:var(--purple);}
+
+main{padding:26px 28px 80px 28px;max-width:1180px;margin:0 auto;}
+.view{display:none;animation:fadein .25s ease;}
+.view.active{display:block;}
+@keyframes fadein{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+
+.view-head{margin-bottom:20px;}
+.view-head h2{font-family:'Space Grotesk';font-size:21px;margin:0 0 4px 0;font-weight:600;}
+.view-head p{margin:0;color:var(--muted);font-size:13px;}
+
+/* ---------- Panels / cards ---------- */
+.panel{
+  background:var(--panel);border:1px solid var(--border-soft);
+  border-radius:var(--radius);padding:20px 22px;margin-bottom:18px;
+}
+.panel-title{
+  font-family:'Space Grotesk';font-size:13.5px;font-weight:600;
+  display:flex;align-items:center;gap:9px;margin:0 0 16px 0;
+  padding-bottom:12px;border-bottom:1px solid var(--border-soft);
+  color:var(--text);
+}
+.panel-title .bar{width:3px;height:14px;border-radius:2px;background:var(--blue);}
+.panel[data-accent="red"] .panel-title .bar{background:var(--red);}
+.panel[data-accent="green"] .panel-title .bar{background:var(--green);}
+.panel[data-accent="amber"] .panel-title .bar{background:var(--amber);}
+.panel[data-accent="purple"] .panel-title .bar{background:var(--purple);}
+
+/* ---------- Forms ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;}
+.field{display:flex;flex-direction:column;gap:6px;}
+.field.full{grid-column:1/-1;}
+.field label{font-size:11.5px;color:var(--muted);font-family:'IBM Plex Mono';letter-spacing:0.2px;}
+.field label .req{color:var(--red);}
+input[type=text],input[type=number],input[type=date],input[type=time],select,textarea{
+  background:var(--bg2);border:1px solid var(--border);color:var(--text);
+  border-radius:7px;padding:9px 11px;font-family:'Inter';font-size:13.5px;
+  outline:none;transition:border-color .15s ease;width:100%;
+}
+textarea{resize:vertical;min-height:64px;font-family:'Inter';}
+input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(47,143,209,0.15);}
+::placeholder{color:var(--muted2);}
+select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%237d92a8'/></svg>");background-repeat:no-repeat;background-position:right 12px center;padding-right:30px;}
+
+.form-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid var(--border-soft);}
+
+button{font-family:'Inter';cursor:pointer;}
+.btn{
+  border:1px solid var(--border);background:var(--panel2);color:var(--text);
+  padding:9px 16px;border-radius:7px;font-size:13px;font-weight:600;
+  display:inline-flex;align-items:center;gap:7px;transition:all .15s ease;
+}
+.btn:hover{border-color:var(--blue);color:var(--blue);}
+.btn-primary{background:linear-gradient(135deg,var(--blue),var(--blue-dim));border-color:transparent;color:#fff;}
+.btn-primary:hover{filter:brightness(1.1);color:#fff;box-shadow:0 4px 14px rgba(47,143,209,0.35);}
+.btn-danger{background:transparent;border-color:var(--red-dim);color:var(--red);}
+.btn-danger:hover{background:rgba(201,72,72,0.12);border-color:var(--red);}
+.btn-ghost{background:transparent;border-color:var(--border);color:var(--muted);}
+.btn-ghost:hover{color:var(--text);border-color:var(--muted);}
+.btn-sm{padding:6px 11px;font-size:12px;}
+.btn-red{background:linear-gradient(135deg,var(--red),var(--red-dim));border-color:transparent;color:#fff;}
+.btn-red:hover{filter:brightness(1.1);color:#fff;}
+.btn-green{background:linear-gradient(135deg,var(--green),var(--green-dim));border-color:transparent;color:#fff;}
+.btn-green:hover{filter:brightness(1.1);color:#fff;}
+
+/* ---------- Tables / lists ---------- */
+.rec-list{display:flex;flex-direction:column;gap:9px;}
+.rec-row{
+  display:flex;align-items:center;justify-content:space-between;gap:14px;
+  background:var(--bg2);border:1px solid var(--border-soft);border-radius:8px;
+  padding:12px 14px;flex-wrap:wrap;
+}
+.rec-main{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.rec-avatar{
+  width:34px;height:34px;border-radius:7px;background:var(--panel2);
+  display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk';
+  font-weight:600;font-size:12.5px;color:var(--blue);border:1px solid var(--border);flex-shrink:0;
+}
+.rec-title{font-weight:600;font-size:13.5px;}
+.rec-sub{font-size:11.5px;color:var(--muted);font-family:'IBM Plex Mono';}
+.rec-actions{display:flex;gap:6px;flex-wrap:wrap;}
+.badge{
+  font-family:'IBM Plex Mono';font-size:10.5px;padding:3px 9px;border-radius:20px;
+  border:1px solid var(--border);color:var(--muted);letter-spacing:0.3px;
+}
+.badge.urgent{color:var(--red);border-color:var(--red-dim);background:rgba(201,72,72,0.1);}
+.badge.paid{color:var(--green);border-color:var(--green-dim);background:rgba(63,167,122,0.1);}
+.badge.pending{color:var(--amber);border-color:var(--amber-dim);background:rgba(209,161,58,0.1);}
+.badge.blue{color:var(--blue);border-color:var(--blue-dim);background:rgba(47,143,209,0.1);}
+.empty{
+  text-align:center;padding:34px 20px;color:var(--muted2);font-size:13px;
+  border:1px dashed var(--border);border-radius:8px;font-family:'IBM Plex Mono';
+}
+
+/* ---------- Stat cards (dashboard) ---------- */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px;}
+.stat-card{
+  background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--radius);
+  padding:16px 18px;position:relative;overflow:hidden;
+}
+.stat-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--blue);}
+.stat-card[data-a="red"]::before{background:var(--red);}
+.stat-card[data-a="green"]::before{background:var(--green);}
+.stat-card[data-a="amber"]::before{background:var(--amber);}
+.stat-card[data-a="purple"]::before{background:var(--purple);}
+.stat-num{font-family:'Space Grotesk';font-size:26px;font-weight:700;}
+.stat-label{font-size:11.5px;color:var(--muted);font-family:'IBM Plex Mono';margin-top:2px;}
+
+/* ---------- Facturation ---------- */
+.fact-cats{display:flex;flex-direction:column;gap:10px;}
+.fact-cat summary{
+  cursor:pointer;font-family:'Space Grotesk';font-weight:600;font-size:13px;
+  padding:10px 12px;background:var(--bg2);border:1px solid var(--border-soft);border-radius:8px;
+  list-style:none;display:flex;align-items:center;justify-content:space-between;
+}
+.fact-cat summary::-webkit-details-marker{display:none;}
+.fact-cat[open] summary{border-color:var(--blue-dim);}
+.fact-items{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;padding:10px 4px 4px 4px;}
+.fact-item{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:var(--bg2);border:1px solid var(--border-soft);border-radius:7px;padding:9px 11px;
+}
+.fact-item .fi-label{font-size:12.5px;}
+.fact-item .fi-price{font-family:'IBM Plex Mono';font-size:12px;color:var(--amber);white-space:nowrap;}
+.fact-item button{border:1px solid var(--border);background:var(--panel2);color:var(--blue);border-radius:6px;width:26px;height:26px;font-size:15px;line-height:1;flex-shrink:0;}
+.fact-item button:hover{background:var(--blue-dim);color:#fff;}
+.fact-cart{background:var(--bg2);border:1px solid var(--border-soft);border-radius:8px;padding:14px;margin-top:14px;}
+.fact-cart-line{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px dashed var(--border-soft);}
+.fact-cart-line:last-child{border-bottom:none;}
+.fact-total{display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+.fact-total b{font-family:'Space Grotesk';font-size:19px;color:var(--amber);}
+
+/* ---------- Triage ---------- */
+.triage-zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+.zone-card{
+  background:var(--bg2);border:1px solid var(--border-soft);border-radius:9px;padding:14px;cursor:pointer;
+  transition:all .15s ease;text-align:center;
+}
+.zone-card:hover{border-color:var(--blue);transform:translateY(-2px);}
+.zone-card .ze{font-size:22px;margin-bottom:6px;}
+.zone-card .zl{font-family:'Space Grotesk';font-weight:600;font-size:13px;}
+.zone-card .zc{font-family:'IBM Plex Mono';font-size:10.5px;color:var(--muted);margin-top:3px;}
+.case-card{
+  background:var(--bg2);border:1px solid var(--border-soft);border-radius:9px;padding:14px 16px;margin-bottom:10px;
+}
+.case-card.urgent{border-color:var(--red-dim);background:rgba(201,72,72,0.06);}
+.case-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;}
+.case-head h4{margin:0;font-family:'Space Grotesk';font-size:14px;}
+.case-kv{font-size:12.5px;margin:4px 0;line-height:1.5;}
+.case-kv b{color:var(--muted);font-family:'IBM Plex Mono';font-size:11px;display:block;margin-bottom:1px;}
+
+/* ---------- Modal (view record) ---------- */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(4,8,14,0.72);backdrop-filter:blur(3px);
+  display:none;align-items:center;justify-content:center;z-index:100;padding:20px;
+}
+.modal-overlay.active{display:flex;}
+.modal-box{
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;
+  max-width:640px;width:100%;max-height:86vh;overflow-y:auto;padding:24px 26px;
+  box-shadow:0 20px 60px rgba(0,0,0,0.5);
+}
+.modal-box h3{font-family:'Space Grotesk';margin:0 0 16px 0;font-size:17px;display:flex;justify-content:space-between;align-items:center;}
+.modal-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;}
+.modal-close:hover{color:var(--text);}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;font-size:13px;}
+.detail-grid .full{grid-column:1/-1;}
+.detail-grid b{display:block;font-family:'IBM Plex Mono';font-size:10.5px;color:var(--muted);margin-bottom:2px;text-transform:uppercase;letter-spacing:0.4px;}
+.detail-grid span{white-space:pre-wrap;}
+
+/* ---------- toast ---------- */
+#toast-wrap{position:fixed;bottom:20px;right:20px;z-index:200;display:flex;flex-direction:column;gap:8px;}
+.toast{
+  background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--green);
+  padding:11px 16px;border-radius:8px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,0.4);
+  animation:toastin .2s ease;min-width:220px;
+}
+.toast.err{border-left-color:var(--red);}
+@keyframes toastin{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:translateX(0);}}
+
+.footer-note{
+  text-align:center;color:var(--muted2);font-size:11px;font-family:'IBM Plex Mono';
+  margin-top:30px;padding-top:16px;border-top:1px solid var(--border-soft);
+}
+.exp-wrap .exp-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.exp-wrap .exp-date{max-width:190px;}
+.exp-wrap input:disabled{opacity:0.35;cursor:not-allowed;}
+.exp-never{width:15px;height:15px;accent-color:var(--blue);}
+.exp-never-label{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);cursor:pointer;white-space:nowrap;}
+.badge.perm{color:var(--blue);border-color:var(--blue-dim);background:rgba(47,143,209,0.1);}
+.badge.expsoon{color:var(--amber);border-color:var(--amber-dim);background:rgba(209,161,58,0.1);}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+@media (max-width:760px){.two-col{grid-template-columns:1fr;}.detail-grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<div class="vitals-strip"></div>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">EMS</div>
+    <div class="brand-text">
+      <h1>EMS TERMINAL — DOSSIERS MÉDICAUX RP</h1>
+      <p><span class="status-dot"></span>SYSTÈME EN LIGNE · STOCKAGE LOCAL DE SESSION</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="clock" id="clock">--:--:--<br><b id="clock-date">--/--/----</b></div>
+    <button class="btn btn-sm" id="save-json-btn" title="Exporter toute la base en fichier .json">⬇ Sauvegarder</button>
+    <label class="btn btn-sm" style="margin:0;" title="Recharger un fichier .json précédemment sauvegardé">
+      ⬆ Charger
+      <input type="file" id="load-json-input" accept=".json" style="display:none;">
+    </label>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab-btn active" data-tab="dashboard"><span class="tab-dot"></span>Accueil</button>
+  <button class="tab-btn" data-tab="patients"><span class="tab-dot"></span>Patients</button>
+  <button class="tab-btn" data-tab="dossier"><span class="tab-dot"></span>Dossier médical</button>
+  <button class="tab-btn" data-accent="red" data-tab="intervention"><span class="tab-dot"></span>Rapport d'intervention</button>
+  <button class="tab-btn" data-accent="green" data-tab="facturation"><span class="tab-dot"></span>Facturation</button>
+  <button class="tab-btn" data-accent="amber" data-tab="triage"><span class="tab-dot"></span>Triage</button>
+  <button class="tab-btn" data-accent="red" data-tab="deces"><span class="tab-dot"></span>Actes de décès</button>
+  <button class="tab-btn" data-accent="purple" data-tab="autres"><span class="tab-dot"></span>Autres documents</button>
+</nav>
+
+<main>
+
+  <!-- ===================== DASHBOARD ===================== -->
+  <section class="view active" id="view-dashboard">
+    <div class="view-head">
+      <h2>Vue d'ensemble</h2>
+      <p>Résumé de l'activité EMS enregistrée dans cette session.</p>
+    </div>
+    <div class="stats-grid" id="stats-grid"></div>
+    <div class="panel">
+      <div class="panel-title"><span class="bar"></span>Activité récente</div>
+      <div class="rec-list" id="recent-activity"></div>
+    </div>
+  </section>
+
+  <!-- ===================== PATIENTS ===================== -->
+  <section class="view" id="view-patients">
+    <div class="view-head">
+      <h2>Gestion des patients</h2>
+      <p>Créer, rechercher, modifier ou supprimer une fiche patient de référence.</p>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span class="bar"></span>Nouveau patient</div>
+      <form id="form-patient" class="grid">
+        <div class="field"><label>Prénom <span class="req">*</span></label><input type="text" name="prenom" required></div>
+        <div class="field"><label>Nom <span class="req">*</span></label><input type="text" name="nom" required></div>
+        <div class="field"><label>Âge</label><input type="text" name="age" placeholder="Ex: 34"></div>
+        <div class="field"><label>Groupe sanguin</label>
+          <select name="groupeSanguin"><option value="">Non déterminé</option><option>O-</option><option>O+</option><option>A-</option><option>A+</option><option>B-</option><option>B+</option><option>AB-</option><option>AB+</option></select>
+        </div>
+        <div class="field full"><label>Allergies</label><input type="text" name="allergies" placeholder="Aucune / préciser"></div>
+        <div class="field full"><label>Contact d'urgence</label><input type="text" name="contactUrgence" placeholder="Nom, lien, numéro RP"></div>
+        <div class="form-actions full"><button type="submit" class="btn btn-primary">＋ Créer le patient</button></div>
+      </form>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span class="bar"></span>Registre des patients</div>
+      <div class="field" style="margin-bottom:14px;"><input type="text" id="patients-search" placeholder="🔍 Rechercher par nom ou prénom..."></div>
+      <div class="rec-list" id="patients-list"></div>
+    </div>
+  </section>
+
+  <!-- ===================== DOSSIER MEDICAL ===================== -->
+  <section class="view" id="view-dossier">
+    <div class="view-head">
+      <h2>Dossier médical — Visite</h2>
+      <p>Fiche de consultation complète : identité, antécédents, examen clinique, conclusion.</p>
+    </div>
+    <form id="form-dossier">
+      <div class="panel">
+        <div class="panel-title"><span class="bar"></span>1 · Identité du patient</div>
+        <div class="grid">
+          <div class="field"><label>Prénom <span class="req">*</span></label><input type="text" name="prenom" required></div>
+          <div class="field"><label>Nom <span class="req">*</span></label><input type="text" name="nom" required></div>
+          <div class="field"><label>Âge</label><input type="text" name="age"></div>
+          <div class="field"><label>Sexe</label><select name="sexe"><option value="">—</option><option>M</option><option>F</option></select></div>
+          <div class="field"><label>Date de la visite</label><input type="date" name="dateVisite"></div>
+          <div class="field"><label>Médecin / EMS</label><input type="text" name="medecin"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span class="bar"></span>2 · Antécédents médicaux</div>
+        <div class="grid">
+          <div class="field full"><label>Allergies</label><textarea name="allergies" placeholder="Aucune / préciser"></textarea></div>
+          <div class="field full"><label>Maladies chroniques</label><textarea name="maladiesChroniques" placeholder="Hypertension, diabète, asthme… / Aucune"></textarea></div>
+          <div class="field"><label>Traitement(s) actuel(s)</label><input type="text" name="traitements"></div>
+          <div class="field"><label>Antécédents chirurgicaux</label><input type="text" name="antecedentsChir"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span class="bar"></span>3 · Examen clinique &amp; constantes</div>
+        <div class="grid">
+          <div class="field"><label>Taille (cm)</label><input type="text" name="taille"></div>
+          <div class="field"><label>Poids (kg)</label><input type="text" name="poids"></div>
+          <div class="field"><label>Groupe sanguin</label>
+            <select name="groupeSanguin"><option value="">Non déterminé</option><option>O-</option><option>O+</option><option>A-</option><option>A+</option><option>B-</option><option>B+</option><option>AB-</option><option>AB+</option></select>
+          </div>
+          <div class="field"><label>Pouls</label><input type="text" name="pouls" placeholder="Normal / Rapide / Lent"></div>
+          <div class="field"><label>Respiration</label><input type="text" name="respiration" placeholder="Normale / Difficile"></div>
+          <div class="field"><label>Vision</label><input type="text" name="vision"></div>
+          <div class="field"><label>Audition</label><input type="text" name="audition"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span class="bar"></span>4 · Observations &amp; conclusion</div>
+        <div class="grid">
+          <div class="field full"><label>Observations du médecin</label><textarea name="observations"></textarea></div>
+          <div class="field"><label>Aptitude / Diagnostic</label><input type="text" name="aptitude"></div>
+          <div class="field"><label>Recommandations</label><input type="text" name="recommandations"></div>
+          <div class="field full"><label>Signature &amp; cachet du médecin</label><input type="text" name="signature"></div>
+          <div class="field full"><label>Rempli par</label><input type="text" name="remplisPar" placeholder="Nom RP de l'agent qui remplit la fiche"></div>
+          <div class="field full exp-wrap"><label>Expiration du document</label>
+            <div class="exp-row">
+              <input type="date" name="expiresAt" class="exp-date" disabled>
+              <label class="exp-never-label"><input type="checkbox" class="exp-never" checked> Conserver indéfiniment</label>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions"><button type="submit" class="btn btn-primary">✓ Enregistrer le dossier</button></div>
+      </div>
+    </form>
+    <div class="panel">
+      <div class="panel-title"><span class="bar"></span>Dossiers enregistrés</div>
+      <div class="rec-list" id="dossier-list"></div>
+    </div>
+  </section>
+
+  <!-- ===================== INTERVENTION ===================== -->
+  <section class="view" id="view-intervention">
+    <div class="view-head">
+      <h2>Rapport d'intervention EMS</h2>
+      <p>Chronologie, état du patient, procédure de soins et conclusion d'intervention.</p>
+    </div>
+    <form id="form-intervention">
+      <div class="panel" data-accent="red">
+        <div class="panel-title"><span class="bar"></span>1 · Horaires &amp; lieu</div>
+        <div class="grid">
+          <div class="field"><label>Date</label><input type="date" name="date"></div>
+          <div class="field"><label>Heure d'appel</label><input type="time" name="heureAppel"></div>
+          <div class="field"><label>Heure d'arrivée</label><input type="time" name="heureArrivee"></div>
+          <div class="field"><label>Heure de fin</label><input type="time" name="heureFin"></div>
+          <div class="field full"><label>Lieu de l'intervention</label><input type="text" name="lieu" placeholder="Adresse ou lieu précis"></div>
+          <div class="field full"><label>Nom(s) du/des EMS présent(s)</label><input type="text" name="emsNoms"></div>
+        </div>
+      </div>
+      <div class="panel" data-accent="red">
+        <div class="panel-title"><span class="bar"></span>2 · Patient</div>
+        <div class="grid">
+          <div class="field"><label>Prénom <span class="req">*</span></label><input type="text" name="patientPrenom" required></div>
+          <div class="field"><label>Nom <span class="req">*</span></label><input type="text" name="patientNom" required></div>
+          <div class="field"><label>Sexe / Âge</label><input type="text" name="sexeAge" placeholder="M/F, âge"></div>
+          <div class="field"><label>Vérification des signes vitaux</label><input type="text" name="signesVitaux" placeholder="Oui / Non"></div>
+          <div class="field full"><label>État à l'arrivée</label><textarea name="etat" placeholder="Inconscient / Conscient mais blessé / Hémorragie, etc."></textarea></div>
+        </div>
+      </div>
+      <div class="panel" data-accent="red">
+        <div class="panel-title"><span class="bar"></span>3 · Procédure de soins</div>
+        <div class="grid">
+          <div class="field full"><label>Premiers soins</label><textarea name="premiersSoins" placeholder="Massage cardiaque / Garrot / Pansement, etc."></textarea></div>
+          <div class="field full"><label>Stabilisation</label><textarea name="stabilisation" placeholder="Oxygène / Médicaments / Défibrillateur"></textarea></div>
+          <div class="field"><label>Transport</label><select name="transport"><option value="">—</option><option>Oui</option><option>Non</option></select></div>
+          <div class="field"><label>Destination</label><input type="text" name="destination" placeholder="Central EMS / Hôpital / Autre"></div>
+          <div class="field full"><label>Observations complémentaires</label><textarea name="observations"></textarea></div>
+        </div>
+      </div>
+      <div class="panel" data-accent="red">
+        <div class="panel-title"><span class="bar"></span>4 · Conclusion</div>
+        <div class="grid">
+          <div class="field full"><label>Conclusion de l'intervention</label><textarea name="conclusion" placeholder="Patient stabilisé / transporté / décédé malgré les soins"></textarea></div>
+          <div class="field"><label>Signature du médecin / secouriste</label><input type="text" name="signature"></div>
+          <div class="field"><label>Rempli par</label><input type="text" name="remplisPar"></div>
+          <div class="field full exp-wrap"><label>Expiration du document</label>
+            <div class="exp-row">
+              <input type="date" name="expiresAt" class="exp-date" disabled>
+              <label class="exp-never-label"><input type="checkbox" class="exp-never" checked> Conserver indéfiniment</label>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions"><button type="submit" class="btn btn-red">✓ Enregistrer le rapport</button></div>
+      </div>
+    </form>
+    <div class="panel">
+      <div class="panel-title"><span class="bar"></span>Interventions récentes</div>
+      <div class="rec-list" id="intervention-list"></div>
+    </div>
+  </section>
+
+  <!-- ===================== FACTURATION ===================== -->
+  <section class="view" id="view-facturation">
+    <div class="view-head">
+      <h2>Facturation EMS</h2>
+      <p>Sélectionner les soins effectués pour calculer et éditer la facture du patient.</p>
+    </div>
+    <div class="panel" data-accent="green">
+      <div class="panel-title"><span class="bar"></span>Patient facturé</div>
+      <div class="grid">
+        <div class="field"><label>Prénom <span class="req">*</span></label><input type="text" id="fact-prenom"></div>
+        <div class="field"><label>Nom <span class="req">*</span></label><input type="text" id="fact-nom"></div>
+        <div class="field"><label>Rempli par</label><input type="text" id="fact-remplispar"></div>
+        <div class="field exp-wrap"><label>Expiration du document</label>
+          <div class="exp-row">
+            <input type="date" id="fact-expires" class="exp-date" disabled>
+            <label class="exp-never-label"><input type="checkbox" id="fact-never" class="exp-never" checked> Indéfiniment</label>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-accent="green">
+      <div class="panel-title"><span class="bar"></span>Catalogue des soins</div>
+      <div class="fact-cats" id="fact-catalog"></div>
+      <div class="fact-cart">
+        <div style="font-family:'IBM Plex Mono';font-size:11px;color:var(--muted);margin-bottom:6px;">SOINS AJOUTÉS</div>
+        <div id="fact-cart-lines"><div class="empty" style="padding:14px;">Aucun soin ajouté pour l'instant.</div></div>
+        <div class="fact-total"><span style="font-size:12.5px;color:var(--muted);">TOTAL PROVISOIRE</span><b id="fact-total">0 $</b></div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="fact-reset">Réinitialiser</button>
+        <button type="button" class="btn btn-green" id="fact-save">✓ Enregistrer la facture</button>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span class="bar"></span>Factures enregistrées</div>
+      <div class="rec-list" id="facture-list"></div>
+    </div>
+  </section>
+
+  <!-- ===================== TRIAGE ===================== -->
+  <section class="view" id="view-triage">
+    <div class="view-head">
+      <h2>Outil de triage</h2>
+      <p>Sélectionner une zone du corps pour consulter les cas possibles. Contenu fictif pour RP — pas un guide médical réel.</p>
+    </div>
+    <div class="panel" data-accent="amber">
+      <div class="panel-title"><span class="bar"></span><span id="triage-crumb">Zones du corps</span></div>
+      <div id="triage-zones" class="triage-zones"></div>
+      <div id="triage-cases" style="display:none;">
+        <button class="btn btn-ghost btn-sm" id="triage-back" style="margin-bottom:14px;">⬅ Changer de zone</button>
+        <div id="triage-case-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== ACTES DE DECES ===================== -->
+  <section class="view" id="view-deces">
+    <div class="view-head">
+      <h2>Acte de décès</h2>
+      <p>Constat de décès officiel RP — identification, circonstances et devenir du corps.</p>
+    </div>
+    <form id="form-deces">
+      <div class="panel" data-accent="red">
+        <div class="panel-title"><span class="bar"></span>1 · Identification du défunt</div>
+        <div class="grid">
+          <div class="field"><label>Prénom <span class="req">*</span></label><input type="text" name="prenom" required></div>
+          <div class="field"><label>Nom <span class="req">*</span></label><input type="text" name="nom" required></div>
+          <div class="field"><label>Âge</label><input type="text" name="age"></div>
+          <div class="field"><label>Sexe</label><select name="sexe"><option value="">—</option><option>M</option><option>F</option></select></div>
+          <div class="field"><label>Méthode d'identification</label><input type="text" name="identification" placeholder="Pièce d'identité / Reconnaissance visuelle / Autre"></div>
+        </div>
+      </div>
+      <div class="panel" data-accent="red">
+        <div class="panel-title"><span class="bar"></span>2 · Circonstances du décès</div>
+        <div class="grid">
+          <div class="field"><label>Date du décès</label><input type="date" name="dateDeces"></div>
+          <div class="field"><label>Heure du décès (constatée)</label><input type="time" name="heureDeces"></div>
+          <div class="field full"><label>Lieu du décès</label><input type="text" name="lieuDeces"></div>
+          <div class="field full"><label>Cause présumée</label><textarea name="causePresumee" placeholder="Arme à feu / Accident / Cause naturelle / Indéterminée…"></textarea></div>
+          <div class="field full"><label>Circonstances</label><textarea name="circonstances"></textarea></div>
+        </div>
+      </div>
+      <div class="panel" data-accent="red">
+        <div class="panel-title"><span class="bar"></span>3 · Constat &amp; devenir du corps</div>
+        <div class="grid">
+          <div class="field"><label>Médecin constatant</label><input type="text" name="medecinConstatant"></div>
+          <div class="field"><label>Autopsie requise</label><select name="autopsie"><option value="">—</option><option>Oui</option><option>Non</option></select></div>
+          <div class="field"><label>Destination du corps</label><select name="destination"><option value="">—</option><option>Morgue</option><option>Institut médico-légal</option><option>Remis à la famille</option><option>Autre</option></select></div>
+          <div class="field"><label>Notification</label><input type="text" name="notification" placeholder="Famille prévenue / Police prévenue"></div>
+          <div class="field full"><label>Observations complémentaires</label><textarea name="observations"></textarea></div>
+          <div class="field"><label>Signature du médecin</label><input type="text" name="signature"></div>
+          <div class="field"><label>Rempli par</label><input type="text" name="remplisPar"></div>
+          <div class="field full exp-wrap"><label>Expiration du document</label>
+            <div class="exp-row">
+              <input type="date" name="expiresAt" class="exp-date" disabled>
+              <label class="exp-never-label"><input type="checkbox" class="exp-never" checked> Conserver indéfiniment</label>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions"><button type="submit" class="btn btn-red">✓ Enregistrer l'acte de décès</button></div>
+      </div>
+    </form>
+    <div class="panel">
+      <div class="panel-title"><span class="bar"></span>Actes enregistrés</div>
+      <div class="rec-list" id="deces-list"></div>
+    </div>
+  </section>
+
+  <!-- ===================== AUTRES DOCUMENTS ===================== -->
+  <section class="view" id="view-autres">
+    <div class="view-head">
+      <h2>Autres documents médicaux</h2>
+      <p>Ordonnance, refus/consentement de soins et fiche de transfert inter-hospitalier.</p>
+    </div>
+
+    <div class="two-col">
+      <div class="panel" data-accent="purple">
+        <div class="panel-title"><span class="bar"></span>Ordonnance médicale</div>
+        <form id="form-ordonnance" class="grid">
+          <div class="field"><label>Prénom patient <span class="req">*</span></label><input type="text" name="patientPrenom" required></div>
+          <div class="field"><label>Nom patient <span class="req">*</span></label><input type="text" name="patientNom" required></div>
+          <div class="field"><label>Date</label><input type="date" name="date"></div>
+          <div class="field"><label>Médecin prescripteur</label><input type="text" name="medecin"></div>
+          <div class="field full"><label>Prescription(s)</label><textarea name="prescriptions" placeholder="Médicament — posologie — durée"></textarea></div>
+          <div class="field"><label>Durée du traitement</label><input type="text" name="duree"></div>
+          <div class="field"><label>Renouvelable</label><select name="renouvelable"><option value="">—</option><option>Oui</option><option>Non</option></select></div>
+          <div class="field full"><label>Signature</label><input type="text" name="signature"></div>
+          <div class="field full exp-wrap"><label>Expiration du document</label>
+            <div class="exp-row">
+              <input type="date" name="expiresAt" class="exp-date" disabled>
+              <label class="exp-never-label"><input type="checkbox" class="exp-never" checked> Conserver indéfiniment</label>
+            </div>
+          </div>
+          <div class="form-actions full"><button type="submit" class="btn btn-primary">✓ Enregistrer</button></div>
+        </form>
+      </div>
+
+      <div class="panel" data-accent="purple">
+        <div class="panel-title"><span class="bar"></span>Consentement / Refus de soins</div>
+        <form id="form-consentement" class="grid">
+          <div class="field"><label>Prénom patient <span class="req">*</span></label><input type="text" name="patientPrenom" required></div>
+          <div class="field"><label>Nom patient <span class="req">*</span></label><input type="text" name="patientNom" required></div>
+          <div class="field"><label>Date</label><input type="date" name="date"></div>
+          <div class="field"><label>Acte concerné</label><input type="text" name="typeActe"></div>
+          <div class="field full"><label>Risques expliqués au patient</label><textarea name="risquesExpliques"></textarea></div>
+          <div class="field"><label>Décision du patient</label><select name="decision"><option value="">—</option><option>Consentement donné</option><option>Refus de soins</option></select></div>
+          <div class="field"><label>Témoin</label><input type="text" name="temoin"></div>
+          <div class="field"><label>Signature patient</label><input type="text" name="signaturePatient"></div>
+          <div class="field"><label>Signature médecin</label><input type="text" name="signatureMedecin"></div>
+          <div class="field full exp-wrap"><label>Expiration du document</label>
+            <div class="exp-row">
+              <input type="date" name="expiresAt" class="exp-date" disabled>
+              <label class="exp-never-label"><input type="checkbox" class="exp-never" checked> Conserver indéfiniment</label>
+            </div>
+          </div>
+          <div class="form-actions full"><button type="submit" class="btn btn-primary">✓ Enregistrer</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="panel" data-accent="purple" style="margin-top:18px;">
+      <div class="panel-title"><span class="bar"></span>Fiche de transfert inter-hospitalier</div>
+      <form id="form-transfert" class="grid">
+        <div class="field"><label>Prénom patient <span class="req">*</span></label><input type="text" name="patientPrenom" required></div>
+        <div class="field"><label>Nom patient <span class="req">*</span></label><input type="text" name="patientNom" required></div>
+        <div class="field"><label>Date</label><input type="date" name="date"></div>
+        <div class="field"><label>Origine</label><input type="text" name="origine"></div>
+        <div class="field"><label>Destination</label><input type="text" name="destination"></div>
+        <div class="field"><label>Moyen de transport</label><input type="text" name="moyenTransport" placeholder="Ambulance / Hélicoptère / Autre"></div>
+        <div class="field"><label>Escorte médicale</label><select name="escorteMedicale"><option value="">—</option><option>Oui</option><option>Non</option></select></div>
+        <div class="field full"><label>Motif du transfert</label><textarea name="motif"></textarea></div>
+        <div class="field full"><label>État du patient au transfert</label><textarea name="etatPatient"></textarea></div>
+        <div class="field"><label>Signature</label><input type="text" name="signature"></div>
+        <div class="field full exp-wrap"><label>Expiration du document</label>
+          <div class="exp-row">
+            <input type="date" name="expiresAt" class="exp-date" disabled>
+            <label class="exp-never-label"><input type="checkbox" class="exp-never" checked> Conserver indéfiniment</label>
+          </div>
+        </div>
+        <div class="form-actions full"><button type="submit" class="btn btn-primary">✓ Enregistrer</button></div>
+      </form>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title"><span class="bar"></span>Documents enregistrés</div>
+      <div class="rec-list" id="autres-list"></div>
+    </div>
+  </section>
+
+  <div class="footer-note">EMS TERMINAL RP — Document non officiel, généré pour usage de jeu de rôle uniquement · Données conservées le temps de la session (utilisez « Sauvegarder » pour exporter)</div>
+</main>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal-box" id="modal-box"></div>
+</div>
+<div id="toast-wrap"></div>
+
+<script>
+/* ============================================================
+   ÉTAT DE L'APPLICATION (en mémoire — export/import via JSON)
+   ============================================================ */
+const DB = {
+  patients: [],
+  dossiers: [],
+  interventions: [],
+  factures: [],
+  deces: [],
+  ordonnances: [],
+  consentements: [],
+  transferts: [],
+};
+let uidCounter = 1;
+function uid(){ return (uidCounter++).toString().padStart(4,'0'); }
+function nowIso(){ return new Date().toISOString(); }
+function fmtDate(iso){
+  if(!iso) return '—';
+  const d = new Date(iso);
+  if(isNaN(d)) return iso;
+  return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+}
+function esc(s){ return (s===undefined||s===null||s==='') ? '—' : String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+/* ============================================================
+   EXPIRATION DES DOCUMENTS
+   ============================================================ */
+function isExpired(d){
+  if(!d || !d.expiresAt) return false;
+  const exp = new Date(d.expiresAt+'T23:59:59');
+  if(isNaN(exp)) return false;
+  return exp.getTime() < Date.now();
+}
+function expBadge(d){
+  if(!d.expiresAt) return '<span class="badge perm">♾ Conservé indéfiniment</span>';
+  return '<span class="badge expsoon">⏳ Expire le '+d.expiresAt+'</span>';
+}
+function purgeExpiredAll(){
+  ['dossiers','interventions','factures','deces','ordonnances','consentements','transferts'].forEach(key=>{
+    DB[key] = DB[key].filter(d=>!isExpired(d));
+  });
+}
+function wireExpiryToggles(){
+  document.querySelectorAll('.exp-wrap').forEach(wrap=>{
+    const chk = wrap.querySelector('.exp-never');
+    const date = wrap.querySelector('.exp-date');
+    if(!chk || !date || chk._wired) return;
+    chk._wired = true;
+    chk.addEventListener('change', ()=>{ date.disabled = chk.checked; if(chk.checked) date.value=''; });
+  });
+}
+
+/* ============================================================
+   LIAISON AUTOMATIQUE DES PATIENTS
+   ============================================================ */
+function ensurePatient(prenom, nom, extra){
+  if(!prenom || !nom) return;
+  const p1 = String(prenom).trim(), n1 = String(nom).trim();
+  if(!p1 || !n1) return;
+  const exists = DB.patients.some(p=>p.prenom.toLowerCase()===p1.toLowerCase() && p.nom.toLowerCase()===n1.toLowerCase());
+  if(!exists){
+    DB.patients.push(Object.assign({id:uid(), prenom:p1, nom:n1, age:'', groupeSanguin:'', allergies:'', contactUrgence:'', createdAt: nowIso()}, extra||{}));
+    renderPatients();
+  }
+}
+function countPatientDocs(prenom, nom){
+  const p=(prenom||'').toLowerCase(), n=(nom||'').toLowerCase();
+  const m1=(a,b)=> (a||'').toLowerCase()===p && (b||'').toLowerCase()===n;
+  let c=0;
+  DB.dossiers.forEach(d=>{ if(m1(d.prenom,d.nom) && !isExpired(d)) c++; });
+  DB.interventions.forEach(d=>{ if(m1(d.patientPrenom,d.patientNom) && !isExpired(d)) c++; });
+  DB.factures.forEach(d=>{ if(m1(d.patientPrenom,d.patientNom) && !isExpired(d)) c++; });
+  DB.deces.forEach(d=>{ if(m1(d.prenom,d.nom) && !isExpired(d)) c++; });
+  DB.ordonnances.forEach(d=>{ if(m1(d.patientPrenom,d.patientNom) && !isExpired(d)) c++; });
+  DB.consentements.forEach(d=>{ if(m1(d.patientPrenom,d.patientNom) && !isExpired(d)) c++; });
+  DB.transferts.forEach(d=>{ if(m1(d.patientPrenom,d.patientNom) && !isExpired(d)) c++; });
+  return c;
+}
+
+function toast(msg, isErr){
+  const wrap = document.getElementById('toast-wrap');
+  const t = document.createElement('div');
+  t.className = 'toast' + (isErr ? ' err' : '');
+  t.textContent = msg;
+  wrap.appendChild(t);
+  setTimeout(()=>{ t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),300); }, 2600);
+}
+
+/* ============================================================
+   NAVIGATION
+   ============================================================ */
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-'+btn.dataset.tab).classList.add('active');
+    if(btn.dataset.tab === 'dashboard') renderDashboard();
+  });
+});
+
+/* Horloge */
+function tickClock(){
+  const d = new Date();
+  document.getElementById('clock').innerHTML =
+    d.toLocaleTimeString('fr-FR') + '<br><b>' + d.toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}) + '</b>';
+}
+tickClock(); setInterval(tickClock, 1000);
+
+/* ============================================================
+   MODALE GÉNÉRIQUE
+   ============================================================ */
+function openModal(title, gridHtml, extraButtonsHtml){
+  document.getElementById('modal-box').innerHTML =
+    '<h3>'+title+'<button class="modal-close" id="modal-close-btn">&times;</button></h3>'+
+    '<div class="detail-grid">'+gridHtml+'</div>'+
+    (extraButtonsHtml ? '<div class="form-actions">'+extraButtonsHtml+'</div>' : '');
+  document.getElementById('modal-overlay').classList.add('active');
+  document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+}
+function closeModal(){ document.getElementById('modal-overlay').classList.remove('active'); }
+document.getElementById('modal-overlay').addEventListener('click', e=>{ if(e.target.id==='modal-overlay') closeModal(); });
+
+function kv(label, value, full){
+  return '<div class="'+(full?'full':'')+'"><b>'+label+'</b><span>'+esc(value)+'</span></div>';
+}
+
+/* ============================================================
+   PDF — moteur générique (mimique le style EMS des rapports)
+   ============================================================ */
+const PDF_BLUE = [0,102,153], PDF_RED=[180,40,40], PDF_SLATE=[30,41,59], PDF_BG=[245,247,250], PDF_DARK=[40,40,40], PDF_MUTED=[100,110,120];
+
+function makePdfDoc(docType, color){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:'mm', format:'a4'});
+  doc._emsColor = color;
+  doc._emsY = 40;
+  drawHeader(doc, docType);
+  return doc;
+}
+function drawHeader(doc, docType){
+  const c = doc._emsColor;
+  doc.setFillColor(...c); doc.rect(0,0,210,26,'F');
+  doc.setTextColor(255,255,255);
+  doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text('EMERGENCY MEDICAL SERVICES', 12, 11);
+  doc.setFont('helvetica','italic'); doc.setFontSize(8);
+  doc.text('Service de Secours & Departement Medical RP', 12, 16);
+  doc.setFont('helvetica','bold'); doc.setFontSize(10);
+  doc.text(docType.toUpperCase(), 198, 13, {align:'right'});
+  doc.setDrawColor(...c); doc.setLineWidth(0.8); doc.line(10,30,200,30);
+  doc._emsY = 38;
+}
+function drawFooterAll(doc){
+  const pages = doc.internal.getNumberOfPages();
+  for(let i=1;i<=pages;i++){
+    doc.setPage(i);
+    doc.setFont('helvetica','italic'); doc.setFontSize(8);
+    doc.setTextColor(...PDF_MUTED);
+    doc.text('EMS Medical Report -- Document Officiel Confidentiel (RP)', 12, 290);
+    doc.text('Page '+i+'/'+pages, 198, 290, {align:'right'});
+  }
+}
+function checkPageBreak(doc, need){
+  if(doc._emsY + need > 275){ doc.addPage(); drawHeader(doc, doc._emsDocType||''); }
+}
+function section(doc, title){
+  checkPageBreak(doc, 14);
+  doc.setFillColor(...PDF_BG); doc.rect(10, doc._emsY, 190, 7, 'F');
+  doc.setTextColor(...doc._emsColor); doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  doc.text('  '+title.toUpperCase(), 10, doc._emsY+5);
+  doc._emsY += 9;
+  doc.setDrawColor(...doc._emsColor); doc.setLineWidth(0.4);
+  doc.line(10, doc._emsY, 200, doc._emsY);
+  doc._emsY += 5;
+}
+function kvBlock(doc, label, value){
+  const val = (value===undefined||value===null||value==='') ? 'Non renseigne' : String(value);
+  const lines = doc.splitTextToSize(val, 186);
+  checkPageBreak(doc, 6 + lines.length*4.5);
+  doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...PDF_DARK);
+  doc.text(label+' :', 12, doc._emsY); doc._emsY += 4.5;
+  doc.setFont('helvetica','normal');
+  doc.text(lines, 12, doc._emsY); doc._emsY += lines.length*4.5 + 2;
+}
+function kvInlinePair(doc, l1,v1,l2,v2){
+  checkPageBreak(doc, 6);
+  doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...PDF_DARK);
+  doc.text(l1+' :', 12, doc._emsY); doc.setFont('helvetica','normal');
+  doc.text(String(v1===undefined||v1===null||v1===''?'N/A':v1), 47, doc._emsY);
+  if(l2){
+    doc.setFont('helvetica','bold'); doc.text(l2+' :', 107, doc._emsY); doc.setFont('helvetica','normal');
+    doc.text(String(v2===undefined||v2===null||v2===''?'N/A':v2), 142, doc._emsY);
+  }
+  doc._emsY += 6;
+}
+function patientBanner(doc, nameLine, rightLine, subLine){
+  doc.setFillColor(...PDF_BG); doc.setDrawColor(...doc._emsColor);
+  doc.rect(10, 34, 190, 20, 'FD');
+  doc.setTextColor(...doc._emsColor); doc.setFont('helvetica','bold'); doc.setFontSize(12);
+  doc.text(nameLine, 14, 41);
+  doc.setTextColor(...PDF_DARK); doc.setFont('helvetica','bold'); doc.setFontSize(9);
+  if(rightLine) doc.text(rightLine, 196, 41, {align:'right'});
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  if(subLine) doc.text(subLine, 14, 48);
+  doc._emsY = 58;
+}
+function signBlock(doc, remplisPar, signature){
+  checkPageBreak(doc, 10);
+  doc._emsY += 3;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...PDF_DARK);
+  doc.text('Rempli par : '+(remplisPar||'—'), 12, doc._emsY);
+  doc.text('Signature : '+(signature||'Non signe'), 140, doc._emsY);
+  doc._emsY += 6;
+}
+function finishPdf(doc, filename){
+  drawFooterAll(doc);
+  doc.save(filename);
+}
+
+/* ============================================================
+   PATIENTS
+   ============================================================ */
+document.getElementById('form-patient').addEventListener('submit', e=>{
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const prenom = fd.get('prenom').trim(), nom = fd.get('nom').trim();
+  if(!prenom || !nom){ toast('Prénom et nom requis', true); return; }
+  if(DB.patients.some(p=>p.prenom.toLowerCase()===prenom.toLowerCase() && p.nom.toLowerCase()===nom.toLowerCase())){
+    toast('Ce patient existe déjà', true); return;
+  }
+  DB.patients.push({
+    id: uid(), prenom, nom, age: fd.get('age'), groupeSanguin: fd.get('groupeSanguin'),
+    allergies: fd.get('allergies'), contactUrgence: fd.get('contactUrgence'), createdAt: nowIso()
+  });
+  e.target.reset();
+  renderPatients(); toast('Patient créé : '+prenom+' '+nom);
+});
+document.getElementById('patients-search').addEventListener('input', renderPatients);
+
+function renderPatients(){
+  const q = (document.getElementById('patients-search').value||'').toLowerCase();
+  const list = document.getElementById('patients-list');
+  const items = DB.patients.filter(p => !q || p.prenom.toLowerCase().includes(q) || p.nom.toLowerCase().includes(q))
+    .sort((a,b)=> a.nom.localeCompare(b.nom));
+  if(items.length===0){ list.innerHTML = '<div class="empty">Aucun patient enregistré.</div>'; return; }
+  list.innerHTML = items.map(p=>{
+    const nDocs = countPatientDocs(p.prenom, p.nom);
+    return `
+    <div class="rec-row">
+      <div class="rec-main">
+        <div class="rec-avatar">${(p.prenom[0]||'?')}${(p.nom[0]||'')}</div>
+        <div>
+          <div class="rec-title">${esc(p.prenom)} ${esc(p.nom)}</div>
+          <div class="rec-sub">${esc(p.age)||'—'} ans · ${p.groupeSanguin||'groupe inconnu'} ${p.allergies ? '· ⚠ '+esc(p.allergies) : ''} · 📁 ${nDocs} document(s) lié(s)</div>
+        </div>
+      </div>
+      <div class="rec-actions">
+        <button class="btn btn-sm btn-ghost" onclick="openPatientDossier('${p.id}')">📁 Dossier complet</button>
+        <button class="btn btn-sm btn-danger" onclick="deletePatient('${p.id}')">Supprimer</button>
+      </div>
+    </div>`;}).join('');
+}
+function openPatientDossier(id){
+  const p = DB.patients.find(x=>x.id===id); if(!p) return;
+  const pf=(p.prenom||'').toLowerCase(), nf=(p.nom||'').toLowerCase();
+  const m1=(a,b)=> (a||'').toLowerCase()===pf && (b||'').toLowerCase()===nf;
+
+  const dossiers = DB.dossiers.filter(d=>m1(d.prenom,d.nom) && !isExpired(d));
+  const interventions = DB.interventions.filter(d=>m1(d.patientPrenom,d.patientNom) && !isExpired(d));
+  const factures = DB.factures.filter(d=>m1(d.patientPrenom,d.patientNom) && !isExpired(d));
+  const deces = DB.deces.filter(d=>m1(d.prenom,d.nom) && !isExpired(d));
+  const ordonnances = DB.ordonnances.filter(d=>m1(d.patientPrenom,d.patientNom) && !isExpired(d));
+  const consentements = DB.consentements.filter(d=>m1(d.patientPrenom,d.patientNom) && !isExpired(d));
+  const transferts = DB.transferts.filter(d=>m1(d.patientPrenom,d.patientNom) && !isExpired(d));
+  const total = dossiers.length+interventions.length+factures.length+deces.length+ordonnances.length+consentements.length+transferts.length;
+
+  function row(icon, title, sub, viewFn, pdfFn){
+    return '<div class="rec-row"><div class="rec-main"><div class="rec-avatar">'+icon+'</div><div><div class="rec-title">'+title+'</div><div class="rec-sub">'+sub+'</div></div></div>'+
+      '<div class="rec-actions"><button class="btn btn-sm btn-ghost" onclick="'+viewFn+'">Détails</button>'+(pdfFn?'<button class="btn btn-sm btn-primary" onclick="'+pdfFn+'">📄 PDF</button>':'')+'</div></div>';
+  }
+
+  let html = '<div class="detail-grid" style="margin-bottom:16px;">'+
+    kv('Prénom',p.prenom)+kv('Nom',p.nom)+kv('Âge',p.age)+kv('Groupe sanguin',p.groupeSanguin)+
+    kv('Allergies',p.allergies,true)+kv('Contact d\'urgence',p.contactUrgence,true)+
+    '</div>';
+  html += '<div style="font-family:\'IBM Plex Mono\';font-size:11px;color:var(--muted);margin:14px 0 8px;">'+total+' document(s) lié(s) à ce patient</div>';
+  html += '<div class="rec-list">';
+  dossiers.forEach(d=> html += row('🩺','Dossier médical · '+esc(d.dateVisite||'date n.c.'), expBadge(d), "closeModal();viewDossier('"+d.id+"')", "pdfDossier('"+d.id+"')"));
+  interventions.forEach(d=> html += row('🚑','Intervention #'+d.id+' · '+esc(d.date||'date n.c.'), expBadge(d), "closeModal();viewIntervention('"+d.id+"')", "pdfIntervention('"+d.id+"')"));
+  factures.forEach(d=> html += row('🧾','Facture #'+d.id+' · '+d.total+' $ ('+d.statut+')', expBadge(d), "closeModal();viewFacture('"+d.id+"')", "pdfFacture('"+d.id+"')"));
+  deces.forEach(d=> html += row('⚰️','Acte de décès · '+esc(d.dateDeces||'date n.c.'), expBadge(d), "closeModal();viewDeces('"+d.id+"')", "pdfDeces('"+d.id+"')"));
+  ordonnances.forEach(d=> html += row('💊','Ordonnance · '+esc(d.date||'date n.c.'), expBadge(d), "closeModal();viewAutre('ordonnance','"+d.id+"')", "pdfAutre('ordonnance','"+d.id+"')"));
+  consentements.forEach(d=> html += row('✍️','Consentement/Refus · '+esc(d.date||'date n.c.'), expBadge(d), "closeModal();viewAutre('consentement','"+d.id+"')", "pdfAutre('consentement','"+d.id+"')"));
+  transferts.forEach(d=> html += row('🔄','Transfert · '+esc(d.date||'date n.c.'), expBadge(d), "closeModal();viewAutre('transfert','"+d.id+"')", "pdfAutre('transfert','"+d.id+"')"));
+  if(total===0) html += '<div class="empty">Aucun document lié à ce patient pour l\'instant.</div>';
+  html += '</div>';
+
+  document.getElementById('modal-box').innerHTML =
+    '<h3>📁 Dossier complet — '+esc(p.prenom)+' '+esc(p.nom)+'<button class="modal-close" id="modal-close-btn">&times;</button></h3>'+html;
+  document.getElementById('modal-overlay').classList.add('active');
+  document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+}
+function deletePatient(id){
+  if(!confirm('Supprimer ce patient ? Action irréversible.')) return;
+  DB.patients = DB.patients.filter(p=>p.id!==id);
+  renderPatients(); toast('Patient supprimé');
+}
+
+/* ============================================================
+   DOSSIER MEDICAL
+   ============================================================ */
+document.getElementById('form-dossier').addEventListener('submit', e=>{
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const data = Object.fromEntries(fd.entries());
+  if(!data.prenom || !data.nom){ toast('Prénom et nom requis', true); return; }
+  data.id = uid(); data.createdAt = nowIso();
+  DB.dossiers.unshift(data);
+  ensurePatient(data.prenom, data.nom, {age:data.age, groupeSanguin:data.groupeSanguin, allergies:data.allergies, contactUrgence:'Visite du '+(data.dateVisite||'')+' - Dr '+(data.medecin||'')});
+  e.target.reset();
+  renderDossiers(); renderPatients(); toast('Dossier médical enregistré');
+});
+
+function renderDossiers(){
+  const list = document.getElementById('dossier-list');
+  const items = DB.dossiers.filter(d=>!isExpired(d));
+  if(items.length===0){ list.innerHTML='<div class="empty">Aucun dossier médical enregistré.</div>'; return; }
+  list.innerHTML = items.map(d=>`
+    <div class="rec-row">
+      <div class="rec-main">
+        <div class="rec-avatar">🩺</div>
+        <div>
+          <div class="rec-title">${esc(d.prenom)} ${esc(d.nom)}</div>
+          <div class="rec-sub">${d.dateVisite||'date n.c.'} · Dr ${esc(d.medecin)||'—'} · ${fmtDate(d.createdAt)} · ${expBadge(d)}</div>
+        </div>
+      </div>
+      <div class="rec-actions">
+        <button class="btn btn-sm btn-ghost" onclick="viewDossier('${d.id}')">Détails</button>
+        <button class="btn btn-sm btn-primary" onclick="pdfDossier('${d.id}')">📄 PDF</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteDossier('${d.id}')">Suppr.</button>
+      </div>
+    </div>`).join('');
+}
+function viewDossier(id){
+  const d = DB.dossiers.find(x=>x.id===id); if(!d) return;
+  openModal('Dossier médical — '+d.prenom+' '+d.nom,
+    kv('Âge',d.age)+kv('Sexe',d.sexe)+kv('Date visite',d.dateVisite)+kv('Médecin',d.medecin)+
+    kv('Allergies',d.allergies,true)+kv('Maladies chroniques',d.maladiesChroniques,true)+
+    kv('Traitements',d.traitements)+kv('Antécédents chir.',d.antecedentsChir)+
+    kv('Taille',d.taille)+kv('Poids',d.poids)+kv('Groupe sanguin',d.groupeSanguin)+kv('Pouls',d.pouls)+
+    kv('Respiration',d.respiration)+kv('Vision',d.vision)+kv('Audition',d.audition)+
+    kv('Observations',d.observations,true)+kv('Aptitude',d.aptitude)+kv('Recommandations',d.recommandations)+
+    kv('Signature',d.signature,true)+kv('Rempli par',d.remplisPar,true),
+    '<button class="btn btn-primary" onclick="pdfDossier(\''+d.id+'\')">📄 Exporter en PDF</button>'
+  );
+}
+function deleteDossier(id){
+  if(!confirm('Supprimer ce dossier ?')) return;
+  DB.dossiers = DB.dossiers.filter(d=>d.id!==id);
+  renderDossiers(); toast('Dossier supprimé');
+}
+function pdfDossier(id){
+  const d = DB.dossiers.find(x=>x.id===id); if(!d) return;
+  const doc = makePdfDoc('Dossier Medical - Visite', PDF_BLUE);
+  doc._emsDocType = 'Dossier Medical - Visite';
+  patientBanner(doc, 'Patient : '+d.prenom+' '+d.nom, 'Date de visite : '+(d.dateVisite||'N/A'), 'Age : '+(d.age||'N/A')+' ans  |  Sexe : '+(d.sexe||'N/A')+'  |  Medecin : '+(d.medecin||'N/A'));
+  section(doc,'Antecedents Medicaux');
+  kvBlock(doc,'Allergies', d.allergies||'Aucune');
+  kvBlock(doc,'Maladies Chroniques', d.maladiesChroniques||'Aucune');
+  kvBlock(doc,'Traitements Actuels', d.traitements||'Non');
+  kvBlock(doc,'Antecedents Chirurgicaux', d.antecedentsChir||'Non');
+  section(doc,'Examen Clinique & Constantes');
+  kvInlinePair(doc,'Taille',(d.taille||'N/A')+' cm','Poids',(d.poids||'N/A')+' kg');
+  kvInlinePair(doc,'Groupe Sanguin', d.groupeSanguin||'N/A','Pouls', d.pouls||'N/A');
+  kvInlinePair(doc,'Respiration', d.respiration||'N/A','Vision', d.vision||'N/A');
+  kvInlinePair(doc,'Audition', d.audition||'N/A');
+  section(doc,'Observations & Conclusion');
+  kvBlock(doc,'Observations du Medecin', d.observations||'Aucune observation enregistree.');
+  kvBlock(doc,'Aptitude / Diagnostic', d.aptitude||'Non specifie');
+  kvBlock(doc,'Recommandations', d.recommandations||'Aucun suivi requis');
+  signBlock(doc, d.remplisPar, d.signature);
+  finishPdf(doc, 'dossier_medical_'+d.prenom+'_'+d.nom+'.pdf');
+}
+
+/* ============================================================
+   INTERVENTION
+   ============================================================ */
+document.getElementById('form-intervention').addEventListener('submit', e=>{
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const data = Object.fromEntries(fd.entries());
+  if(!data.patientPrenom || !data.patientNom){ toast('Prénom et nom du patient requis', true); return; }
+  data.id = uid(); data.createdAt = nowIso();
+  DB.interventions.unshift(data);
+  ensurePatient(data.patientPrenom, data.patientNom);
+  e.target.reset();
+  renderInterventions(); renderPatients(); toast('Rapport d\'intervention enregistré');
+});
+function renderInterventions(){
+  const list = document.getElementById('intervention-list');
+  const items = DB.interventions.filter(d=>!isExpired(d));
+  if(items.length===0){ list.innerHTML='<div class="empty">Aucune intervention enregistrée.</div>'; return; }
+  list.innerHTML = items.map(d=>`
+    <div class="rec-row">
+      <div class="rec-main">
+        <div class="rec-avatar" style="color:var(--red);">🚑</div>
+        <div>
+          <div class="rec-title">#${d.id} — ${esc(d.patientPrenom)} ${esc(d.patientNom)}</div>
+          <div class="rec-sub">${d.date||'date n.c.'} · ${esc(d.lieu)||'lieu n.c.'} · ${fmtDate(d.createdAt)} · ${expBadge(d)}</div>
+        </div>
+      </div>
+      <div class="rec-actions">
+        <button class="btn btn-sm btn-ghost" onclick="viewIntervention('${d.id}')">Détails</button>
+        <button class="btn btn-sm btn-primary" onclick="pdfIntervention('${d.id}')">📄 PDF</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteIntervention('${d.id}')">Suppr.</button>
+      </div>
+    </div>`).join('');
+}
+function viewIntervention(id){
+  const d = DB.interventions.find(x=>x.id===id); if(!d) return;
+  openModal('Rapport d\'intervention #'+d.id,
+    kv('Date',d.date)+kv('Heure d\'appel',d.heureAppel)+kv('Heure d\'arrivée',d.heureArrivee)+kv('Heure de fin',d.heureFin)+
+    kv('Lieu',d.lieu,true)+kv('EMS présents',d.emsNoms,true)+
+    kv('Patient',d.patientPrenom+' '+d.patientNom)+kv('Sexe/Âge',d.sexeAge)+kv('Signes vitaux vérifiés',d.signesVitaux)+
+    kv('État à l\'arrivée',d.etat,true)+kv('Premiers soins',d.premiersSoins,true)+kv('Stabilisation',d.stabilisation,true)+
+    kv('Transport',d.transport)+kv('Destination',d.destination)+kv('Observations',d.observations,true)+
+    kv('Conclusion',d.conclusion,true)+kv('Signature',d.signature)+kv('Rempli par',d.remplisPar),
+    '<button class="btn btn-red" onclick="pdfIntervention(\''+d.id+'\')">📄 Exporter en PDF</button>'
+  );
+}
+function deleteIntervention(id){
+  if(!confirm('Supprimer cette intervention ?')) return;
+  DB.interventions = DB.interventions.filter(d=>d.id!==id);
+  renderInterventions(); toast('Intervention supprimée');
+}
+function pdfIntervention(id){
+  const d = DB.interventions.find(x=>x.id===id); if(!d) return;
+  const doc = makePdfDoc("Rapport d'Intervention #"+d.id, PDF_RED);
+  doc._emsDocType = "Rapport d'Intervention #"+d.id;
+  patientBanner(doc, 'Patient : '+d.patientPrenom+' '+d.patientNom, 'Date : '+(d.date||'N/A'), 'Lieu : '+(d.lieu||'N/A'));
+  section(doc,'Chronologie');
+  kvInlinePair(doc,'Heure d appel', d.heureAppel||'N/A','Heure d arrivee', d.heureArrivee||'N/A');
+  kvInlinePair(doc,'Heure de fin', d.heureFin||'N/A','EMS presents', d.emsNoms||'N/A');
+  section(doc,'État du patient');
+  kvInlinePair(doc,'Sexe / Age', d.sexeAge||'N/A','Signes vitaux verifies', d.signesVitaux||'N/A');
+  kvBlock(doc,'Etat a l arrivee', d.etat||'Non renseigne');
+  section(doc,'Procédure de soins');
+  kvBlock(doc,'Premiers soins', d.premiersSoins||'Aucun');
+  kvBlock(doc,'Stabilisation', d.stabilisation||'Aucune');
+  kvInlinePair(doc,'Transport', d.transport||'N/A','Destination', d.destination||'N/A');
+  kvBlock(doc,'Observations complementaires', d.observations||'Aucune');
+  section(doc,'Conclusion');
+  kvBlock(doc,'Conclusion de l intervention', d.conclusion||'Non renseignee');
+  signBlock(doc, d.remplisPar, d.signature);
+  finishPdf(doc, 'rapport_intervention_'+d.id+'.pdf');
+}
+
+/* ============================================================
+   FACTURATION
+   ============================================================ */
+const FACTURATION_CATEGORIES = {
+  soins_base: { label: "💉 Soins de base", items: [
+    ["Consultation / Diagnostic",500],["Soin léger (égratignure, hématome)",550],
+    ["Soin classique (plaie modérée, brûlure)",1000],["Soin lourd (fracture, blessure par balle)",1600]]},
+  interventions: { label: "🏥 Interventions & Urgences", items: [
+    ["Intervention urgente sur site",1500],["Extraction en zone dangereuse (fusillade)",1800],
+    ["Réanimation sur place",1500],["Réanimation en zone à haut risque",10000]]},
+  transport: { label: "🚑 Transport médical", items: [
+    ["Transport ambulance (ville / hôpital)",1250],["Transport d'urgence / Zone à risque",1800],
+    ["Transport longue distance / Hors ville",2400],["Escorte médicale (convoi / VIP)",2700],
+    ["Transport de corps (morgue)",1500]]},
+  visites_tests: { label: "🩺 Visites & Tests", items: [
+    ["Visite médicale standard",1000],["Visite médicale approfondie",1500],
+    ["Visite d'aptitude professionnelle",1800],["Test psychotechnique (PPA)",2000],["Rattrapage test PPA",1000]]},
+  pharmacie: { label: "💊 Pharmacie & Services", items: [
+    ["Ordonnance / Prescription",500],["Kit de soin / Bandages",550],["Certificat médical RP",500],
+    ["Test alcool / drogue RP",500],["Vaccin standard / Rappel",600],["Vaccination schéma complet",1200],
+    ["Carnet de vaccination RP",300]]},
+  maternite: { label: "👶 Maternité", items: [
+    ["Consultation prénatale / Post-natale",600],["Suivi de grossesse complet",2500],
+    ["Accouchement standard",3000],["Accouchement complexe / Césarienne",4500]]},
+  fin_de_vie: { label: "⚰️ Fin de vie & Légale", items: [
+    ["Accompagnement & Soins palliatifs",2000],["Constat de décès RP",1000]]},
+  assistance: { label: "🧑‍⚕️ Assistance & Dispositifs", items: [
+    ["Dispositif médical sur événement",3000],["Assistance opération spéciale",3500],
+    ["Support en zone dangereuse",5000],["Contrat d'assistance longue durée",8000]]},
+};
+let factSession = { items: [] }; // {label, prix}
+
+function renderFactCatalog(){
+  const wrap = document.getElementById('fact-catalog');
+  wrap.innerHTML = Object.values(FACTURATION_CATEGORIES).map(cat=>`
+    <details class="fact-cat">
+      <summary>${cat.label} <span style="color:var(--muted);font-family:'IBM Plex Mono';font-size:10.5px;">${cat.items.length} soins</span></summary>
+      <div class="fact-items">
+        ${cat.items.map(([label,prix])=>`
+          <div class="fact-item">
+            <div><div class="fi-label">${label}</div><div class="fi-price">${prix} $</div></div>
+            <button type="button" onclick="factAdd('${label.replace(/'/g,"\\\'")}',${prix})">＋</button>
+          </div>`).join('')}
+      </div>
+    </details>`).join('');
+}
+function factAdd(label, prix){
+  factSession.items.push({label, prix});
+  renderFactCart();
+}
+function factRemove(i){
+  factSession.items.splice(i,1);
+  renderFactCart();
+}
+function renderFactCart(){
+  const linesEl = document.getElementById('fact-cart-lines');
+  if(factSession.items.length===0){
+    linesEl.innerHTML = '<div class="empty" style="padding:14px;">Aucun soin ajouté pour l\'instant.</div>';
+  } else {
+    linesEl.innerHTML = factSession.items.map((it,i)=>`
+      <div class="fact-cart-line"><span>${it.label}</span><span style="display:flex;align-items:center;gap:10px;"><b style="color:var(--amber);font-family:'IBM Plex Mono';">${it.prix} $</b><button type="button" onclick="factRemove(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;">✕</button></span></div>`).join('');
+  }
+  const total = factSession.items.reduce((s,it)=>s+it.prix,0);
+  document.getElementById('fact-total').textContent = total+' $';
+}
+document.getElementById('fact-reset').addEventListener('click', ()=>{
+  factSession = {items:[]};
+  document.getElementById('fact-prenom').value=''; document.getElementById('fact-nom').value=''; document.getElementById('fact-remplispar').value='';
+  document.getElementById('fact-never').checked = true;
+  document.getElementById('fact-expires').value = ''; document.getElementById('fact-expires').disabled = true;
+  renderFactCart();
+});
+document.getElementById('fact-save').addEventListener('click', ()=>{
+  const prenom = document.getElementById('fact-prenom').value.trim();
+  const nom = document.getElementById('fact-nom').value.trim();
+  if(!prenom||!nom){ toast('Prénom et nom du patient requis', true); return; }
+  if(factSession.items.length===0){ toast('Ajoutez au moins un soin', true); return; }
+  const total = factSession.items.reduce((s,it)=>s+it.prix,0);
+  const neverExp = document.getElementById('fact-never').checked;
+  const expiresAt = neverExp ? null : (document.getElementById('fact-expires').value || null);
+  DB.factures.unshift({
+    id: uid(), patientPrenom: prenom, patientNom: nom,
+    items: factSession.items.slice(), total, statut: 'En attente', expiresAt,
+    remplisPar: document.getElementById('fact-remplispar').value, createdAt: nowIso()
+  });
+  ensurePatient(prenom, nom);
+  document.getElementById('fact-reset').click();
+  renderFactures(); toast('Facture enregistrée');
+});
+function renderFactures(){
+  const list = document.getElementById('facture-list');
+  const items = DB.factures.filter(f=>!isExpired(f));
+  if(items.length===0){ list.innerHTML='<div class="empty">Aucune facture enregistrée.</div>'; return; }
+  list.innerHTML = items.map(f=>`
+    <div class="rec-row">
+      <div class="rec-main">
+        <div class="rec-avatar" style="color:var(--green);">🧾</div>
+        <div>
+          <div class="rec-title">#${f.id} — ${esc(f.patientPrenom)} ${esc(f.patientNom)} <span class="badge ${f.statut==='Payée'?'paid':'pending'}">${f.statut}</span></div>
+          <div class="rec-sub">${f.items.length} soin(s) · <b style="color:var(--amber);">${f.total} $</b> · ${fmtDate(f.createdAt)} · ${expBadge(f)}</div>
+        </div>
+      </div>
+      <div class="rec-actions">
+        <button class="btn btn-sm btn-ghost" onclick="viewFacture('${f.id}')">Détails</button>
+        ${f.statut!=='Payée' ? '<button class="btn btn-sm btn-green" onclick="payFacture(\''+f.id+'\')">💳 Payée</button>' : ''}
+        <button class="btn btn-sm btn-primary" onclick="pdfFacture('${f.id}')">📄 PDF</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteFacture('${f.id}')">Suppr.</button>
+      </div>
+    </div>`).join('');
+}
+function viewFacture(id){
+  const f = DB.factures.find(x=>x.id===id); if(!f) return;
+  openModal('Facture #'+f.id,
+    kv('Patient', f.patientPrenom+' '+f.patientNom)+kv('Statut', f.statut)+
+    kv('Soins', f.items.map(i=>i.label+' — '+i.prix+' $').join('\\n'), true)+
+    kv('Total', f.total+' $')+kv('Rempli par', f.remplisPar)
+  );
+}
+function payFacture(id){
+  const f = DB.factures.find(x=>x.id===id); if(!f) return;
+  f.statut = 'Payée'; renderFactures(); toast('Facture marquée payée');
+}
+function deleteFacture(id){
+  if(!confirm('Supprimer cette facture ?')) return;
+  DB.factures = DB.factures.filter(f=>f.id!==id);
+  renderFactures(); toast('Facture supprimée');
+}
+function pdfFacture(id){
+  const f = DB.factures.find(x=>x.id===id); if(!f) return;
+  const doc = makePdfDoc('Facturation #'+f.id, [40,120,80]);
+  doc._emsDocType = 'Facturation #'+f.id;
+  patientBanner(doc, 'Patient : '+f.patientPrenom+' '+f.patientNom, 'Statut : '+f.statut, 'Facture N. '+f.id);
+  section(doc,'Détail des soins');
+  f.items.forEach(it=>{ kvInlinePair(doc, it.label, it.prix+' $'); });
+  doc._emsY += 3;
+  doc.setDrawColor(...doc._emsColor); doc.line(10,doc._emsY,200,doc._emsY); doc._emsY+=7;
+  doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...doc._emsColor);
+  doc.text('TOTAL : '+f.total+' $', 12, doc._emsY); doc._emsY += 8;
+  signBlock(doc, f.remplisPar, '');
+  finishPdf(doc, 'facturation_'+f.id+'.pdf');
+}
+
+/* ============================================================
+   TRIAGE
+   ============================================================ */
+const TRIAGE_DATA = {
+  tete: { label:'Tête', emoji:'🧠', cases:[
+    {title:'Traumatisme crânien léger', symptoms:'Étourdissement, légère douleur, pas de perte de conscience', soins:"Surveillance, repos, glace.", meds:'Antalgique léger.'},
+    {title:'Traumatisme crânien sévère', symptoms:'Perte de conscience, vomissements, confusion', soins:'Immobilisation cervicale, scanner, surveillance neurologique.', meds:'Analgésie prudente.', urgent:true},
+    {title:'Hémorragie faciale', symptoms:'Saignement visible au visage', soins:'Compression, nettoyage, sutures si besoin.', meds:'Antiseptique.'},
+  ]},
+  cou: { label:'Cou', emoji:'🎗️', cases:[
+    {title:'Entorse cervicale (coup du lapin)', symptoms:'Douleur au cou, raideur', soins:'Collier cervical, repos.', meds:'Anti-inflammatoire.'},
+    {title:'Traumatisme cervical grave', symptoms:'Douleur intense, engourdissement des membres', soins:'Immobilisation stricte, transport prioritaire.', meds:'Analgésie prudente.', urgent:true},
+    {title:'Strangulation / Étouffement', symptoms:'Marques au cou, difficulté à respirer, voix rauque', soins:'Libération des voies aériennes, oxygène, surveillance.', meds:'Oxygénothérapie.', urgent:true},
+  ]},
+  thorax: { label:'Thorax', emoji:'🫁', cases:[
+    {title:'Contusion thoracique', symptoms:'Douleur à la respiration, hématome', soins:'Repos, surveillance respiratoire.', meds:'Antalgique.'},
+    {title:'Fracture de côtes', symptoms:'Douleur vive, difficulté à respirer profondément', soins:'Immobilisation relative, radiographie.', meds:'Antalgique fort.'},
+    {title:'Pneumothorax', symptoms:'Douleur thoracique brutale, essoufflement sévère', soins:'Exsufflation, oxygène, transport urgent.', meds:'Oxygénothérapie.', urgent:true},
+    {title:'Plaie par balle / arme blanche au thorax', symptoms:'Plaie pénétrante, hémorragie, détresse respiratoire', soins:'Pansement occlusif, oxygène, transport immédiat.', meds:'Remplissage vasculaire.', urgent:true},
+  ]},
+  abdomen: { label:'Abdomen', emoji:'🩹', cases:[
+    {title:'Douleur abdominale simple', symptoms:'Douleur localisée, pas de signe de gravité', soins:'Surveillance, examen clinique.', meds:'Antispasmodique.'},
+    {title:'Hémorragie interne suspectée', symptoms:'Douleur intense, pâleur, pouls rapide', soins:'Position allongée, perfusion, transport urgent.', meds:'Remplissage vasculaire.', urgent:true},
+    {title:'Plaie pénétrante abdominale', symptoms:'Plaie ouverte, saignement, douleur intense', soins:'Pansement stérile, ne pas retirer corps étranger, transport immédiat.', meds:'Antalgique fort.', urgent:true},
+  ]},
+  bras: { label:'Bras', emoji:'💪', cases:[
+    {title:'Entorse du poignet', symptoms:'Douleur, gonflement léger', soins:'Immobilisation légère, glace.', meds:'Anti-inflammatoire.'},
+    {title:'Fracture du bras', symptoms:'Douleur intense, déformation visible', soins:'Attelle, immobilisation, radiographie.', meds:'Antalgique fort.'},
+    {title:'Coupure / plaie superficielle', symptoms:'Saignement modéré, plaie propre ou souillée', soins:'Nettoyage, suture si profonde, pansement.', meds:'Antiseptique local, antalgique léger.'},
+    {title:'Brûlure', symptoms:'Rougeur, cloques, douleur au contact', soins:'Refroidissement immédiat à l\'eau tempérée, pansement stérile.', meds:'Crème cicatrisante, antalgique.'},
+  ]},
+  jambes: { label:'Jambes', emoji:'🦵', cases:[
+    {title:'Entorse de la cheville', symptoms:'Gonflement, douleur, difficulté à marcher', soins:'Protocole RICE (repos, glace, compression, élévation).', meds:'Anti-inflammatoire, antalgique.'},
+    {title:'Fracture de jambe', symptoms:'Douleur intense, déformation visible', soins:'Immobilisation, radiographie, chirurgie parfois nécessaire.', meds:'Antalgique fort, anticoagulant préventif.', urgent:true},
+    {title:'Suspicion de phlébite', symptoms:'Jambe gonflée, chaude et douloureuse', soins:'Échographie doppler, surveillance rapprochée.', meds:'Anticoagulant.', urgent:true},
+  ]},
+  vitaux: { label:'Signes Vitaux', emoji:'❤️', cases:[
+    {title:'Tachycardie', symptoms:'Pouls rapide (>100 bpm), palpitations, parfois vertiges', soins:'Mise au repos, monitoring cardiaque, ECG.', meds:'Bêta-bloquant si indiqué.', urgent:true},
+    {title:'Bradycardie', symptoms:'Pouls lent (<60 bpm), fatigue, sensation de malaise', soins:'Monitoring cardiaque, ECG, surveillance tension.', meds:'Atropine si symptomatique.', urgent:true},
+    {title:'Pouls faible / filant', symptoms:'Pouls difficile à percevoir, peau pâle et moite', soins:'Position allongée jambes surélevées, oxygène, perfusion.', meds:'Remplissage vasculaire.', urgent:true},
+    {title:'Hypotension artérielle', symptoms:'Vertiges, vision trouble, faiblesse, pâleur', soins:'Position allongée jambes surélevées, surveillance.', meds:'Perfusion si sévère.'},
+    {title:'Hypertension artérielle sévère', symptoms:'Maux de tête intenses, bourdonnements, vision floue', soins:'Repos au calme, surveillance tension, ECG.', meds:'Antihypertenseur.', urgent:true},
+    {title:'Détresse respiratoire / hypoxie', symptoms:'Essoufflement marqué, lèvres bleutées, confusion', soins:'Position assise, oxygène à haut débit, surveillance saturation.', meds:'Bronchodilatateur, oxygénothérapie.', urgent:true},
+  ]},
+};
+function renderTriageZones(){
+  document.getElementById('triage-zones').innerHTML = Object.entries(TRIAGE_DATA).map(([key,z])=>`
+    <div class="zone-card" onclick="showTriageZone('${key}')">
+      <div class="ze">${z.emoji}</div><div class="zl">${z.label}</div><div class="zc">${z.cases.length} cas</div>
+    </div>`).join('');
+}
+function showTriageZone(key){
+  const z = TRIAGE_DATA[key];
+  document.getElementById('triage-zones').style.display='none';
+  document.getElementById('triage-cases').style.display='block';
+  document.getElementById('triage-crumb').textContent = z.label + ' — cas possibles';
+  const sorted = z.cases.slice().sort((a,b)=> (b.urgent?1:0)-(a.urgent?1:0));
+  document.getElementById('triage-case-list').innerHTML = sorted.map(c=>`
+    <div class="case-card ${c.urgent?'urgent':''}">
+      <div class="case-head"><h4>${c.title}${c.urgent?' ⚠️ Priorité 1':''}</h4>${c.urgent?'<span class="badge urgent">URGENT</span>':''}</div>
+      <div class="case-kv"><b>SYMPTÔMES</b>${c.symptoms}</div>
+      <div class="case-kv"><b>SOINS</b>${c.soins}</div>
+      <div class="case-kv"><b>MÉDICAMENTS</b>${c.meds}</div>
+    </div>`).join('') + '<div style="color:var(--muted2);font-size:11px;font-family:\'IBM Plex Mono\';margin-top:8px;">Contenu fictif pour RP — pas un guide médical réel.</div>';
+}
+document.getElementById('triage-back').addEventListener('click', ()=>{
+  document.getElementById('triage-zones').style.display='grid';
+  document.getElementById('triage-cases').style.display='none';
+  document.getElementById('triage-crumb').textContent = 'Zones du corps';
+});
+
+/* ============================================================
+   ACTES DE DÉCÈS
+   ============================================================ */
+document.getElementById('form-deces').addEventListener('submit', e=>{
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const data = Object.fromEntries(fd.entries());
+  if(!data.prenom || !data.nom){ toast('Prénom et nom requis', true); return; }
+  data.id = uid(); data.createdAt = nowIso();
+  DB.deces.unshift(data);
+  ensurePatient(data.prenom, data.nom);
+  e.target.reset();
+  renderDeces(); renderPatients(); toast('Acte de décès enregistré');
+});
+function renderDeces(){
+  const list = document.getElementById('deces-list');
+  const items = DB.deces.filter(d=>!isExpired(d));
+  if(items.length===0){ list.innerHTML='<div class="empty">Aucun acte de décès enregistré.</div>'; return; }
+  list.innerHTML = items.map(d=>`
+    <div class="rec-row">
+      <div class="rec-main">
+        <div class="rec-avatar" style="color:var(--red);">⚰️</div>
+        <div>
+          <div class="rec-title">${esc(d.prenom)} ${esc(d.nom)} <span class="badge urgent">DÉCÈS</span></div>
+          <div class="rec-sub">${d.dateDeces||'date n.c.'} ${d.heureDeces||''} · ${esc(d.lieuDeces)||'lieu n.c.'} · ${expBadge(d)}</div>
+        </div>
+      </div>
+      <div class="rec-actions">
+        <button class="btn btn-sm btn-ghost" onclick="viewDeces('${d.id}')">Détails</button>
+        <button class="btn btn-sm btn-red" onclick="pdfDeces('${d.id}')">📄 PDF</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteDeces('${d.id}')">Suppr.</button>
+      </div>
+    </div>`).join('');
+}
+function viewDeces(id){
+  const d = DB.deces.find(x=>x.id===id); if(!d) return;
+  openModal('Acte de décès — '+d.prenom+' '+d.nom,
+    kv('Âge',d.age)+kv('Sexe',d.sexe)+kv('Identification',d.identification,true)+
+    kv('Date décès',d.dateDeces)+kv('Heure décès',d.heureDeces)+kv('Lieu',d.lieuDeces,true)+
+    kv('Cause présumée',d.causePresumee,true)+kv('Circonstances',d.circonstances,true)+
+    kv('Médecin constatant',d.medecinConstatant)+kv('Autopsie requise',d.autopsie)+
+    kv('Destination du corps',d.destination)+kv('Notification',d.notification)+
+    kv('Observations',d.observations,true)+kv('Signature',d.signature)+kv('Rempli par',d.remplisPar),
+    '<button class="btn btn-red" onclick="pdfDeces(\''+d.id+'\')">📄 Exporter en PDF</button>'
+  );
+}
+function deleteDeces(id){
+  if(!confirm('Supprimer cet acte de décès ?')) return;
+  DB.deces = DB.deces.filter(d=>d.id!==id);
+  renderDeces(); toast('Acte supprimé');
+}
+function pdfDeces(id){
+  const d = DB.deces.find(x=>x.id===id); if(!d) return;
+  const doc = makePdfDoc('Acte de Deces #'+d.id, PDF_SLATE);
+  doc._emsDocType = 'Acte de Deces #'+d.id;
+  patientBanner(doc, 'Defunt(e) : '+d.prenom+' '+d.nom, 'Date : '+(d.dateDeces||'N/A'), 'Age : '+(d.age||'N/A')+'  |  Sexe : '+(d.sexe||'N/A'));
+  section(doc,'Identification');
+  kvBlock(doc,'Methode d identification', d.identification||'Non renseignee');
+  section(doc,'Circonstances du deces');
+  kvInlinePair(doc,'Date du deces', d.dateDeces||'N/A','Heure constatee', d.heureDeces||'N/A');
+  kvBlock(doc,'Lieu du deces', d.lieuDeces||'Non renseigne');
+  kvBlock(doc,'Cause presumee', d.causePresumee||'Indeterminee');
+  kvBlock(doc,'Circonstances', d.circonstances||'Non renseignees');
+  section(doc,'Constat & devenir du corps');
+  kvInlinePair(doc,'Medecin constatant', d.medecinConstatant||'N/A','Autopsie requise', d.autopsie||'N/A');
+  kvInlinePair(doc,'Destination du corps', d.destination||'N/A','Notification', d.notification||'N/A');
+  kvBlock(doc,'Observations complementaires', d.observations||'Aucune');
+  signBlock(doc, d.remplisPar, d.signature);
+  finishPdf(doc, 'acte_deces_'+d.prenom+'_'+d.nom+'.pdf');
+}
+
+/* ============================================================
+   AUTRES DOCUMENTS : Ordonnance / Consentement / Transfert
+   ============================================================ */
+document.getElementById('form-ordonnance').addEventListener('submit', e=>{
+  e.preventDefault();
+  const fd = new FormData(e.target); const data = Object.fromEntries(fd.entries());
+  if(!data.patientPrenom||!data.patientNom){ toast('Prénom et nom requis', true); return; }
+  data.id = uid(); data.type='ordonnance'; data.createdAt = nowIso();
+  DB.ordonnances.unshift(data); ensurePatient(data.patientPrenom, data.patientNom); e.target.reset();
+  renderAutres(); renderPatients(); toast('Ordonnance enregistrée');
+});
+document.getElementById('form-consentement').addEventListener('submit', e=>{
+  e.preventDefault();
+  const fd = new FormData(e.target); const data = Object.fromEntries(fd.entries());
+  if(!data.patientPrenom||!data.patientNom){ toast('Prénom et nom requis', true); return; }
+  data.id = uid(); data.type='consentement'; data.createdAt = nowIso();
+  DB.consentements.unshift(data); ensurePatient(data.patientPrenom, data.patientNom); e.target.reset();
+  renderAutres(); renderPatients(); toast('Document enregistré');
+});
+document.getElementById('form-transfert').addEventListener('submit', e=>{
+  e.preventDefault();
+  const fd = new FormData(e.target); const data = Object.fromEntries(fd.entries());
+  if(!data.patientPrenom||!data.patientNom){ toast('Prénom et nom requis', true); return; }
+  data.id = uid(); data.type='transfert'; data.createdAt = nowIso();
+  DB.transferts.unshift(data); ensurePatient(data.patientPrenom, data.patientNom); e.target.reset();
+  renderAutres(); renderPatients(); toast('Fiche de transfert enregistrée');
+});
+
+function renderAutres(){
+  const list = document.getElementById('autres-list');
+  const all = [
+    ...DB.ordonnances.map(d=>({...d,_kind:'Ordonnance',_icon:'💊'})),
+    ...DB.consentements.map(d=>({...d,_kind:'Consentement/Refus',_icon:'✍️'})),
+    ...DB.transferts.map(d=>({...d,_kind:'Transfert',_icon:'🔄'})),
+  ].filter(d=>!isExpired(d)).sort((a,b)=> new Date(b.createdAt)-new Date(a.createdAt));
+  if(all.length===0){ list.innerHTML='<div class="empty">Aucun document enregistré.</div>'; return; }
+  list.innerHTML = all.map(d=>`
+    <div class="rec-row">
+      <div class="rec-main">
+        <div class="rec-avatar" style="color:var(--purple);">${d._icon}</div>
+        <div>
+          <div class="rec-title">${d._kind} — ${esc(d.patientPrenom)} ${esc(d.patientNom)}</div>
+          <div class="rec-sub">${d.date||'date n.c.'} · ${fmtDate(d.createdAt)} · ${expBadge(d)}</div>
+        </div>
+      </div>
+      <div class="rec-actions">
+        <button class="btn btn-sm btn-ghost" onclick="viewAutre('${d.type}','${d.id}')">Détails</button>
+        <button class="btn btn-sm btn-primary" onclick="pdfAutre('${d.type}','${d.id}')">📄 PDF</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteAutre('${d.type}','${d.id}')">Suppr.</button>
+      </div>
+    </div>`).join('');
+}
+function autreCollection(type){
+  if(type==='ordonnance') return DB.ordonnances;
+  if(type==='consentement') return DB.consentements;
+  return DB.transferts;
+}
+function viewAutre(type, id){
+  const d = autreCollection(type).find(x=>x.id===id); if(!d) return;
+  let grid = kv('Patient', d.patientPrenom+' '+d.patientNom)+kv('Date', d.date);
+  if(type==='ordonnance'){
+    grid += kv('Médecin',d.medecin)+kv('Durée',d.duree)+kv('Renouvelable',d.renouvelable)+
+      kv('Prescriptions',d.prescriptions,true)+kv('Signature',d.signature,true);
+  } else if(type==='consentement'){
+    grid += kv('Acte concerné',d.typeActe)+kv('Décision',d.decision)+kv('Témoin',d.temoin)+
+      kv('Risques expliqués',d.risquesExpliques,true)+kv('Signature patient',d.signaturePatient)+kv('Signature médecin',d.signatureMedecin);
+  } else {
+    grid += kv('Origine',d.origine)+kv('Destination',d.destination)+kv('Moyen de transport',d.moyenTransport)+
+      kv('Escorte médicale',d.escorteMedicale)+kv('Motif',d.motif,true)+kv('État du patient',d.etatPatient,true)+kv('Signature',d.signature);
+  }
+  openModal('Document — '+d.patientPrenom+' '+d.patientNom, grid,
+    '<button class="btn btn-primary" onclick="pdfAutre(\''+type+'\',\''+d.id+'\')">📄 Exporter en PDF</button>');
+}
+function deleteAutre(type, id){
+  if(!confirm('Supprimer ce document ?')) return;
+  if(type==='ordonnance') DB.ordonnances = DB.ordonnances.filter(d=>d.id!==id);
+  else if(type==='consentement') DB.consentements = DB.consentements.filter(d=>d.id!==id);
+  else DB.transferts = DB.transferts.filter(d=>d.id!==id);
+  renderAutres(); toast('Document supprimé');
+}
+function pdfAutre(type, id){
+  const d = autreCollection(type).find(x=>x.id===id); if(!d) return;
+  const titles = {ordonnance:'Ordonnance Medicale', consentement:'Consentement / Refus de Soins', transfert:'Fiche de Transfert Inter-Hospitalier'};
+  const doc = makePdfDoc(titles[type]+' #'+d.id, [107,91,168]);
+  doc._emsDocType = titles[type]+' #'+d.id;
+  patientBanner(doc, 'Patient : '+d.patientPrenom+' '+d.patientNom, 'Date : '+(d.date||'N/A'), '');
+  if(type==='ordonnance'){
+    section(doc,'Prescription');
+    kvBlock(doc,'Medecin prescripteur', d.medecin||'N/A');
+    kvBlock(doc,'Prescriptions', d.prescriptions||'Aucune');
+    kvInlinePair(doc,'Duree', d.duree||'N/A','Renouvelable', d.renouvelable||'N/A');
+    signBlock(doc,'', d.signature);
+  } else if(type==='consentement'){
+    section(doc,'Consentement');
+    kvBlock(doc,'Acte concerne', d.typeActe||'N/A');
+    kvBlock(doc,'Risques expliques au patient', d.risquesExpliques||'Non renseigne');
+    kvInlinePair(doc,'Decision', d.decision||'N/A','Temoin', d.temoin||'N/A');
+    signBlock(doc,'', 'Patient: '+(d.signaturePatient||'—')+' / Medecin: '+(d.signatureMedecin||'—'));
+  } else {
+    section(doc,'Transfert');
+    kvInlinePair(doc,'Origine', d.origine||'N/A','Destination', d.destination||'N/A');
+    kvInlinePair(doc,'Moyen de transport', d.moyenTransport||'N/A','Escorte medicale', d.escorteMedicale||'N/A');
+    kvBlock(doc,'Motif du transfert', d.motif||'Non renseigne');
+    kvBlock(doc,'Etat du patient', d.etatPatient||'Non renseigne');
+    signBlock(doc,'', d.signature);
+  }
+  finishPdf(doc, type+'_'+d.patientPrenom+'_'+d.patientNom+'.pdf');
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+function renderDashboard(){
+  const stats = [
+    {n: DB.patients.length, l:'Patients enregistrés', a:'blue'},
+    {n: DB.dossiers.length, l:'Dossiers médicaux', a:'blue'},
+    {n: DB.interventions.length, l:'Interventions EMS', a:'red'},
+    {n: DB.factures.length, l:'Factures', a:'green'},
+    {n: DB.deces.length, l:'Actes de décès', a:'red'},
+    {n: DB.ordonnances.length+DB.consentements.length+DB.transferts.length, l:'Autres documents', a:'purple'},
+  ];
+  document.getElementById('stats-grid').innerHTML = stats.map(s=>`
+    <div class="stat-card" data-a="${s.a}"><div class="stat-num">${s.n}</div><div class="stat-label">${s.l}</div></div>`).join('');
+
+  const all = [
+    ...DB.dossiers.map(d=>({t:'Dossier médical', s:d.prenom+' '+d.nom, at:d.createdAt, icon:'🩺'})),
+    ...DB.interventions.map(d=>({t:'Rapport d\'intervention', s:d.patientPrenom+' '+d.patientNom, at:d.createdAt, icon:'🚑'})),
+    ...DB.factures.map(d=>({t:'Facturation', s:d.patientPrenom+' '+d.patientNom+' — '+d.total+' $', at:d.createdAt, icon:'🧾'})),
+    ...DB.deces.map(d=>({t:'Acte de décès', s:d.prenom+' '+d.nom, at:d.createdAt, icon:'⚰️'})),
+    ...DB.ordonnances.map(d=>({t:'Ordonnance', s:d.patientPrenom+' '+d.patientNom, at:d.createdAt, icon:'💊'})),
+    ...DB.consentements.map(d=>({t:'Consentement/Refus', s:d.patientPrenom+' '+d.patientNom, at:d.createdAt, icon:'✍️'})),
+    ...DB.transferts.map(d=>({t:'Transfert', s:d.patientPrenom+' '+d.patientNom, at:d.createdAt, icon:'🔄'})),
+  ].sort((a,b)=> new Date(b.at)-new Date(a.at)).slice(0,10);
+
+  const el = document.getElementById('recent-activity');
+  if(all.length===0){ el.innerHTML = '<div class="empty">Aucune activité pour l\'instant. Créez un dossier, un rapport ou une facture pour commencer.</div>'; return; }
+  el.innerHTML = all.map(a=>`
+    <div class="rec-row">
+      <div class="rec-main"><div class="rec-avatar">${a.icon}</div><div><div class="rec-title">${a.t}</div><div class="rec-sub">${esc(a.s)}</div></div></div>
+      <div class="badge blue">${fmtDate(a.at)}</div>
+    </div>`).join('');
+}
+
+/* ============================================================
+   EXPORT / IMPORT JSON (persistance manuelle, sans stockage navigateur)
+   ============================================================ */
+document.getElementById('save-json-btn').addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify({DB, uidCounter}, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'ems_dossiers_'+new Date().toISOString().slice(0,10)+'.json';
+  a.click(); URL.revokeObjectURL(url);
+  toast('Base exportée en .json');
+});
+document.getElementById('load-json-input').addEventListener('change', e=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ev=>{
+    try{
+      const parsed = JSON.parse(ev.target.result);
+      if(!parsed.DB) throw new Error('format invalide');
+      Object.assign(DB, parsed.DB);
+      uidCounter = parsed.uidCounter || uidCounter;
+      renderAll();
+      toast('Base chargée avec succès');
+    }catch(err){ toast('Fichier invalide : '+err.message, true); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+/* ============================================================
+   INIT
+   ============================================================ */
+function renderAll(){
+  purgeExpiredAll();
+  renderPatients(); renderDossiers(); renderInterventions(); renderFactures(); renderDeces(); renderAutres(); renderDashboard();
+}
+renderFactCatalog();
+renderFactCart();
+renderTriageZones();
+wireExpiryToggles();
+renderAll();
+/* Vérifie et retire les documents expirés toutes les minutes */
+setInterval(renderAll, 60000);
+</script>
+</body>
+</html>
