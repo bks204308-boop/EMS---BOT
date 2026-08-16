@@ -639,21 +639,67 @@ _MODIF_LABELS = {
 }
 
 async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_prenom: str, ancien_nom: str, data: dict):
+    dossier = await get_dossier_personnel(ancien_prenom, ancien_nom)
+    if not dossier:
+        await interaction.response.send_message(
+            f"❌ Aucun dossier trouvé pour **{ancien_prenom} {ancien_nom}**. Modification annulée.",
+            ephemeral=True
+        )
+        return
+
+    nouveau_prenom = data.get("nouveau_prenom") or dossier["prenom"]
+    nouveau_nom = data.get("nouveau_nom") or dossier["nom"]
+    nouveau_age = data.get("nouveau_age") or dossier["age"]
+    nouveau_groupe = data.get("nouveau_groupe") or dossier["groupe_sanguin"]
+    nouvelles_allergies = data.get("nouvelles_allergies") or dossier["allergies"]
+
+    renomme = (nouveau_prenom != ancien_prenom) or (nouveau_nom != ancien_nom)
+    if renomme:
+        existant = await get_dossier_personnel(nouveau_prenom, nouveau_nom)
+        if existant:
+            await interaction.response.send_message(
+                f"❌ Un patient nommé **{nouveau_prenom} {nouveau_nom}** existe déjà. Modification annulée.",
+                ephemeral=True
+            )
+            return
+        await delete_dossier_personnel(ancien_prenom, ancien_nom)
+
+    # Enregistrement réel des modifications dans la base de données
+    await save_dossier_personnel(
+        prenom=nouveau_prenom,
+        nom=nouveau_nom,
+        age=nouveau_age,
+        groupe_sanguin=nouveau_groupe,
+        allergies=nouvelles_allergies,
+        contact_urgence=dossier["contact_urgence"],
+        created_by=interaction.user.id,
+    )
+
     updates = []
     for key, label in _MODIF_LABELS.items():
         value = data.get(key)
         if value:
             suffix = " cm" if key == "nouvelle_taille" else (" kg" if key == "nouveau_poids" else "")
             updates.append(f"**{label} :** {value}{suffix}")
+
+    titre_dossier = f"{nouveau_prenom} {nouveau_nom}"
+    if renomme:
+        titre_dossier += f" *(anciennement {ancien_prenom} {ancien_nom})*"
+
     embed = discord.Embed(
         title="**__🩺 Modification du Dossier Médical__**",
-        description=f"**Ancien dossier :** {ancien_prenom} {ancien_nom}",
+        description=f"**Dossier :** {titre_dossier}",
         color=discord.Color.gold()
     )
     if updates:
         embed.add_field(name="**Modifications effectuées**", value="\n".join(updates), inline=False)
     else:
         embed.add_field(name="Aucune modification", value="Aucun champ n'a été modifié.", inline=False)
+    embed.add_field(
+        name="✅ Enregistré",
+        value="Prénom, nom, âge, groupe sanguin et allergies ont été mis à jour dans le dossier du patient.",
+        inline=False
+    )
     embed.set_footer(text=f"Modifié par {interaction.user.display_name}")
     await interaction.response.send_message(embed=embed)
 
