@@ -475,6 +475,58 @@ def generate_pdf_facture(patient_prenom: str, patient_nom: str, details_list: Li
     pdf.cell(190, 5, clean_pdf_text(f"Emise par : {footer_info} -- Document a conserver pour dossier RP"), align="C")
     return _export_buffer(pdf)
 
+COLOR_GREEN = (30, 120, 70)
+
+def generate_pdf_ordonnance(patient_prenom: str, patient_nom: str, lignes: List[dict], total: int, footer_info: str = "") -> io.BytesIO:
+    pdf = EMSPDF(doc_type="Ordonnance Medicale", primary_color=COLOR_GREEN)
+    pdf.add_page()
+    pdf.set_fill_color(*COLOR_BG_LIGHT)
+    pdf.set_draw_color(*COLOR_GREEN)
+    pdf.rect(10, 34, 190, 18, 'DF')
+    pdf.set_xy(14, 38)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(*COLOR_GREEN)
+    pdf.cell(120, 6, clean_pdf_text(f"Patient : {patient_prenom} {patient_nom}"))
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*COLOR_TEXT_DARK)
+    pdf.cell(60, 6, clean_pdf_text(f"Date : {datetime.now().strftime('%d/%m/%Y')}"), align="R", ln=1)
+    pdf.set_y(58)
+    pdf.draw_section_header("Traitement prescrit")
+    for ligne in lignes:
+        med = ligne["med"]
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*COLOR_GREEN)
+        addictif_tag = " [RISQUE ADDICTION]" if med.get("addictif") else ""
+        pdf.multi_cell(190, 5, clean_pdf_text(f"{med['nom']}{addictif_tag}"))
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(*COLOR_TEXT_DARK)
+        posologie = f"Posologie : {ligne['frequence']}, {ligne['repas']} le repas -- Duree : {ligne['duree']} jour(s)"
+        pdf.multi_cell(190, 5, clean_pdf_text(posologie))
+        symptomes = ", ".join(med.get("symptomes", []))
+        pdf.multi_cell(190, 5, clean_pdf_text(f"Indique pour : {symptomes}"))
+        if med.get("contre_indications"):
+            pdf.set_font("Helvetica", "I", 8)
+            pdf.set_text_color(*COLOR_TEXT_MUTED)
+            pdf.multi_cell(190, 4, clean_pdf_text("Contre-indications : " + " | ".join(med["contre_indications"])))
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*COLOR_TEXT_DARK)
+        pdf.cell(190, 5, clean_pdf_text(f"Prix ligne : {ligne['prix_ligne']} $"), ln=1, align="R")
+        pdf.ln(3)
+        pdf.set_draw_color(200, 200, 200)
+        pdf.set_line_width(0.2)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(3)
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(*COLOR_GREEN)
+    pdf.cell(130, 8, "TOTAL ORDONNANCE :", align="R")
+    pdf.cell(60, 8, f"{total} $  ", align="R", ln=1)
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(*COLOR_TEXT_MUTED)
+    pdf.cell(190, 5, clean_pdf_text(f"Prescrit par : {footer_info} -- Document a conserver pour dossier RP"), align="C")
+    return _export_buffer(pdf)
+
 # ---------- VIEWS ET BOUTONS ----------
 class SafeView(discord.ui.View):
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
@@ -1151,13 +1203,22 @@ FACTURATION_CATEGORIES = {
             "constat_deces": {"label": "Constat de décès RP", "prix": 1000},
         },
     },
-    "assistance": {
-        "label": "🧑‍⚕️ Assistance & Dispositifs",
+    "consommables": {
+        "label": "🩹 Consommables médicaux",
         "items": {
-            "assistance_evenement": {"label": "Dispositif médical sur événement", "prix": 3000},
-            "presence_operation": {"label": "Assistance opération spéciale", "prix": 3500},
-            "support_zone_dangereuse": {"label": "Support en zone dangereuse", "prix": 5000},
-            "assistance_longue_duree": {"label": "Contrat d'assistance longue durée", "prix": 8000},
+            "poche_sang": {"label": "Poche de sang (1 unité)", "prix": 900},
+            "kit_perfusion": {"label": "Kit de perfusion / Soluté", "prix": 350},
+            "kit_intraveineux": {"label": "Kit intraveineux complet", "prix": 450},
+            "seringue": {"label": "Seringue stérile (unité)", "prix": 40},
+            "gants_steriles": {"label": "Gants stériles (boîte)", "prix": 60},
+            "compresses": {"label": "Compresses stériles (lot)", "prix": 80},
+            "garrot": {"label": "Garrot hémostatique", "prix": 150},
+            "attelle": {"label": "Attelle de fixation", "prix": 200},
+            "collier_cervical": {"label": "Collier cervical", "prix": 250},
+            "masque_oxygene": {"label": "Masque à oxygène + bouteille", "prix": 400},
+            "kit_suture": {"label": "Kit de suture complet", "prix": 300},
+            "defibrillateur_usage": {"label": "Utilisation défibrillateur (patch)", "prix": 500},
+            "civiere": {"label": "Location civière / brancard", "prix": 200},
         },
     },
 }
@@ -1180,6 +1241,339 @@ def build_facturation_embed(session: FacturationSession, note: Optional[str] = N
     if note:
         embed.add_field(name="Étape actuelle", value=note, inline=False)
     return embed
+
+# ---------- ORDONNANCE MÉDICALE ----------
+MEDICAMENTS_CATEGORIES = {
+    "sans_addiction": {
+        "label": "💊 Médicaments sans addiction",
+        "items": {
+            "paracetamol": {
+                "nom": "Paracétamol — Antalgique, antipyrétique",
+                "prix_jour": 50,
+                "symptomes": ["Douleur", "Fièvre"],
+                "contre_indications": [
+                    "Ne pas dépasser 1 mois de prescription",
+                    "Ne pas prescrire plus d'une semaine à la fois",
+                    "Déconseillé en cas de forte consommation d'alcool ou problème de foie",
+                ],
+                "repas": "après",
+                "frequence": "3x/jour (matin, midi, soir)",
+                "addictif": False,
+            },
+            "ibuprofene": {
+                "nom": "Ibuprofène — Anti-inflammatoire, antipyrétique, analgésique",
+                "prix_jour": 50,
+                "symptomes": ["Douleur", "Fièvre", "Inflammation"],
+                "contre_indications": [
+                    "Déconseillé chez la femme enceinte",
+                    "Fortement déconseillé en cas d'infection ou de risque d'infection",
+                ],
+                "repas": "après",
+                "frequence": "3x/jour",
+                "addictif": False,
+            },
+            "aspirine": {
+                "nom": "Aspirine — Antalgique, anti-inflammatoire, antipyrétique, antiagrégant plaquettaire",
+                "prix_jour": 50,
+                "symptomes": ["Douleur", "Fièvre", "Inflammation", "Anticoagulation"],
+                "contre_indications": [
+                    "Privilégier un autre médicament si possible",
+                    "Ne pas prescrire après une intervention chirurgicale récente",
+                ],
+                "repas": "après",
+                "frequence": "3x/jour",
+                "addictif": False,
+            },
+            "cyclizine": {
+                "nom": "Cyclizine — Antiémétique, sédatif",
+                "prix_jour": 50,
+                "symptomes": ["Vomissements", "Nausées"],
+                "contre_indications": ["Ne pas prescrire chez la femme enceinte", "Rend légèrement somnolent"],
+                "repas": "indifférent",
+                "frequence": "2x/jour",
+                "addictif": False,
+            },
+            "lithium": {
+                "nom": "Traitement au lithium — Thymorégulateur",
+                "prix_jour": 150,
+                "symptomes": ["Phases maniaques (troubles bipolaires)", "Épisodes dépressifs", "Prévention schizophrénie"],
+                "contre_indications": [
+                    "Peut causer soif, envies fréquentes d'uriner, nausées, léger tremblement des mains",
+                    "Ne pas associer avec l'ibuprofène",
+                ],
+                "repas": "après",
+                "frequence": "2x/jour",
+                "addictif": False,
+            },
+            "beta_bloquants": {
+                "nom": "Bêta-bloquants — Régulateur, anti-hypertenseur",
+                "prix_jour": 150,
+                "symptomes": ["Arythmie", "Tachycardie", "Hypertension artérielle"],
+                "contre_indications": [
+                    "Utiliser uniquement en cas de pathologie cardiaque avérée",
+                    "Augmente légèrement le risque d'AVC",
+                ],
+                "repas": "avant",
+                "frequence": "1x/jour (matin)",
+                "addictif": False,
+            },
+            "captopril": {
+                "nom": "Captopril (IEC) — Anti-hypertenseur",
+                "prix_jour": 150,
+                "symptomes": ["Hypertension artérielle"],
+                "contre_indications": [
+                    "Peut causer maux de tête passagers, rougeurs, saignements abondants en cas de blessure",
+                ],
+                "repas": "avant",
+                "frequence": "2x/jour",
+                "addictif": False,
+            },
+            "helicidine": {
+                "nom": "Hélicidine — Expectorant",
+                "prix_jour": 50,
+                "symptomes": ["Toux grasse"],
+                "contre_indications": ["Possible réaction allergique si allergie à la bave d'escargot"],
+                "repas": "indifférent",
+                "frequence": "3x/jour",
+                "addictif": False,
+            },
+        },
+    },
+    "avec_addiction": {
+        "label": "⚠️ Médicaments à risque d'addiction",
+        "items": {
+            "tramadol": {
+                "nom": "Tramadol — Analgésique",
+                "prix_jour": 150,
+                "symptomes": ["Douleur forte"],
+                "contre_indications": [
+                    "Prescrire uniquement si les antidouleurs sans risque ne suffisent pas",
+                    "Accord d'un supérieur requis",
+                ],
+                "repas": "après",
+                "frequence": "3x/jour",
+                "addictif": True,
+            },
+            "morphine": {
+                "nom": "Morphine — Analgésique, sédatif",
+                "prix_jour": 200,
+                "symptomes": ["Douleur très forte", "Réduction de l'état de conscience à forte dose"],
+                "contre_indications": [
+                    "Prescrire uniquement si les antidouleurs sans risque ne suffisent pas",
+                    "Administration sous contrôle médical strict, interdiction de sortie de l'hôpital",
+                    "Accord d'un supérieur requis",
+                ],
+                "repas": "indifférent",
+                "frequence": "Selon prescription médicale stricte",
+                "addictif": True,
+            },
+            "loprazolam": {
+                "nom": "Loprazolam — Anxiolytique, anticonvulsivant, sédatif",
+                "prix_jour": 150,
+                "symptomes": ["Anxiété", "Convulsions (dues à un problème neuronal)", "Insomnie sévère"],
+                "contre_indications": [
+                    "N'administrer qu'en cas de convulsions d'origine neuronale",
+                    "Accord d'un supérieur requis",
+                ],
+                "repas": "avant",
+                "frequence": "1x/jour (soir)",
+                "addictif": True,
+            },
+            "epinephrine": {
+                "nom": "Épinéphrine — Vasodilatateur, broncho-dilatateur",
+                "prix_jour": 150,
+                "symptomes": ["Arrêt cardio-respiratoire", "Réaction allergique sévère (anaphylaxie)"],
+                "contre_indications": ["Ne pas utiliser plus d'une dose par jour"],
+                "repas": "indifférent",
+                "frequence": "1 dose maximum/jour",
+                "addictif": True,
+            },
+            "cocillana": {
+                "nom": "Cocillana — Antitussif",
+                "prix_jour": 50,
+                "symptomes": ["Toux sèche"],
+                "contre_indications": [
+                    "Contient de la codéine, risque de dépendance à forte dose",
+                    "Peut causer somnolence, déconseillé de conduire",
+                ],
+                "repas": "indifférent",
+                "frequence": "3x/jour",
+                "addictif": True,
+            },
+        },
+    },
+}
+
+class OrdonnanceSession:
+    def __init__(self):
+        self.lignes: List[dict] = []
+        self.total = 0
+        self.patient_prenom: str = ""
+        self.patient_nom: str = ""
+
+def build_ordonnance_embed(session: OrdonnanceSession, note: Optional[str] = None) -> discord.Embed:
+    embed = discord.Embed(title="📋 Ordonnance Médicale", color=discord.Color.dark_green())
+    embed.add_field(name="Patient", value=f"{session.patient_prenom} {session.patient_nom}", inline=False)
+    if session.lignes:
+        lignes_txt = []
+        for l in session.lignes:
+            tag = " ⚠️" if l["med"].get("addictif") else ""
+            lignes_txt.append(f"• {l['med']['nom']}{tag} — {l['duree']}j — {l['prix_ligne']} $")
+        embed.add_field(name="Médicaments prescrits", value="\n".join(lignes_txt), inline=False)
+        embed.add_field(name="Total provisoire", value=f"**{session.total} $**", inline=False)
+    else:
+        embed.description = "Aucun médicament ajouté pour le moment."
+    if note:
+        embed.add_field(name="Étape actuelle", value=note, inline=False)
+    return embed
+
+class OrdonnanceCategorySelect(discord.ui.Select):
+    def __init__(self, session: OrdonnanceSession):
+        self.session = session
+        options = [discord.SelectOption(label=cat["label"][:100], value=key) for key, cat in MEDICAMENTS_CATEGORIES.items()]
+        super().__init__(placeholder="Choisis une catégorie de médicaments...", options=options)
+    async def callback(self, interaction: discord.Interaction):
+        cat_key = self.values[0]
+        note = f"Catégorie : {MEDICAMENTS_CATEGORIES[cat_key]['label']}"
+        embed = build_ordonnance_embed(self.session, note=note)
+        view = OrdonnanceItemView(self.session, cat_key)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class OrdonnanceCategoryView(SafeView):
+    def __init__(self, session: OrdonnanceSession):
+        super().__init__(timeout=180)
+        self.add_item(OrdonnanceCategorySelect(session))
+
+class OrdonnanceItemSelect(discord.ui.Select):
+    def __init__(self, session: OrdonnanceSession, cat_key: str):
+        self.session = session
+        self.cat_key = cat_key
+        items = MEDICAMENTS_CATEGORIES[cat_key]["items"]
+        options = []
+        for k, v in items.items():
+            tag = "⚠️ " if v.get("addictif") else ""
+            options.append(discord.SelectOption(label=f"{tag}{v['nom'][:90]}", description=f"{v['prix_jour']} $/jour", value=k))
+        super().__init__(placeholder="Sélectionne un médicament...", min_values=1, max_values=1, options=options)
+    async def callback(self, interaction: discord.Interaction):
+        key = self.values[0]
+        med = MEDICAMENTS_CATEGORIES[self.cat_key]["items"][key]
+        await interaction.response.send_modal(DureeModal(self.session, med))
+
+class DureeModal(discord.ui.Modal, title="Durée du traitement"):
+    jours = discord.ui.TextInput(label="Nombre de jours de traitement", placeholder="Ex: 7", default="7")
+    def __init__(self, session: OrdonnanceSession, med: dict):
+        super().__init__()
+        self.session = session
+        self.med = med
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            duree = int(self.jours.value)
+            if duree < 1: duree = 1
+            if duree > 60: duree = 60
+        except ValueError:
+            duree = 1
+        prix_ligne = self.med["prix_jour"] * duree
+        self.session.total += prix_ligne
+        self.session.lignes.append({
+            "med": self.med,
+            "duree": duree,
+            "frequence": self.med["frequence"],
+            "repas": self.med["repas"],
+            "prix_ligne": prix_ligne,
+        })
+        embed = build_ordonnance_embed(self.session)
+        view = OrdonnanceSummaryView(self.session)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class BackToOrdonnanceCategoryButton(discord.ui.Button):
+    def __init__(self, session: OrdonnanceSession):
+        super().__init__(label="↩️ Changer de catégorie", style=discord.ButtonStyle.secondary, row=1)
+        self.session = session
+    async def callback(self, interaction: discord.Interaction):
+        embed = build_ordonnance_embed(self.session)
+        view = OrdonnanceCategoryView(self.session)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class OrdonnanceItemView(SafeView):
+    def __init__(self, session: OrdonnanceSession, cat_key: str):
+        super().__init__(timeout=180)
+        self.add_item(OrdonnanceItemSelect(session, cat_key))
+        self.add_item(BackToOrdonnanceCategoryButton(session))
+
+class ExportOrdonnancePDFView(SafeView):
+    def __init__(self, session: OrdonnanceSession, footer: str = ""):
+        super().__init__(timeout=300)
+        self.session = session
+        self.footer = footer
+    @discord.ui.button(label="📄 Exporter en PDF", style=discord.ButtonStyle.secondary)
+    async def export(self, interaction: discord.Interaction, button: discord.ui.Button):
+        buf = generate_pdf_ordonnance(
+            patient_prenom=self.session.patient_prenom,
+            patient_nom=self.session.patient_nom,
+            lignes=self.session.lignes,
+            total=self.session.total,
+            footer_info=self.footer,
+        )
+        await interaction.response.send_message(
+            file=discord.File(buf, filename=f"ordonnance_{self.session.patient_prenom}_{self.session.patient_nom}.pdf"),
+            ephemeral=True
+        )
+
+class OrdonnanceSummaryView(SafeView):
+    def __init__(self, session: OrdonnanceSession):
+        super().__init__(timeout=180)
+        self.session = session
+    @discord.ui.button(label="➕ Ajouter un autre médicament", style=discord.ButtonStyle.secondary)
+    async def add_more(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = build_ordonnance_embed(self.session)
+        view = OrdonnanceCategoryView(self.session)
+        await interaction.response.edit_message(embed=embed, view=view)
+    @discord.ui.button(label="✅ Terminer et générer l'ordonnance", style=discord.ButtonStyle.success)
+    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
+        alerte = ""
+        if any(l["med"].get("addictif") for l in self.session.lignes):
+            alerte = "\n⚠️ **Cette ordonnance contient un médicament à risque d'addiction — accord d'un supérieur requis avant délivrance.**"
+        detail_text = "\n".join(
+            f"• {l['med']['nom']} — {l['frequence']}, {l['repas']} le repas — {l['duree']}j — {l['prix_ligne']} $"
+            for l in self.session.lignes
+        ) or "Aucun médicament sélectionné"
+
+        record_id = await save_dossier_intervention(
+            patient_prenom=self.session.patient_prenom,
+            patient_nom=self.session.patient_nom,
+            blessure="Ordonnance médicale",
+            soins=detail_text,
+            transport="",
+            facture=str(self.session.total),
+            statut_facture="Facturé",
+            created_by=interaction.user.id,
+            created_by_name=interaction.user.display_name,
+        )
+
+        embed = discord.Embed(title="📋 Ordonnance finalisée", color=discord.Color.dark_green())
+        embed.add_field(name="Patient", value=f"{self.session.patient_prenom} {self.session.patient_nom}", inline=False)
+        embed.add_field(name="Médicaments prescrits", value=detail_text, inline=False)
+        embed.add_field(name="Total", value=f"**{self.session.total} $**", inline=False)
+        if alerte:
+            embed.add_field(name="Alerte", value=alerte, inline=False)
+            embed.color = discord.Color.orange()
+        embed.set_footer(text=f"Prescrit par {interaction.user.display_name} • Dossier n°{record_id}")
+
+        final_view = ExportOrdonnancePDFView(self.session, footer=interaction.user.display_name)
+        await interaction.response.edit_message(embed=embed, view=final_view)
+
+@bot.tree.command(name="ordonnance", description="Créer une ordonnance médicale et générer le PDF")
+@app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
+async def ordonnance(interaction: discord.Interaction, prenom: str, nom: str):
+    session = OrdonnanceSession()
+    session.patient_prenom = prenom
+    session.patient_nom = nom
+    dossier = await get_dossier_personnel(prenom, nom)
+    if dossier:
+        session.patient_prenom = dossier["prenom"]
+        session.patient_nom = dossier["nom"]
+    embed = build_ordonnance_embed(session, note="Choisis une catégorie de médicaments pour commencer.")
+    await interaction.response.send_message(embed=embed, view=OrdonnanceCategoryView(session))
 
 class FacturationCategorySelect(discord.ui.Select):
     def __init__(self, session: FacturationSession):
