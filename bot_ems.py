@@ -490,32 +490,40 @@ def generate_pdf_ordonnance(patient_prenom: str, patient_nom: str, lignes: List[
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*COLOR_TEXT_DARK)
     pdf.cell(60, 6, clean_pdf_text(f"Date : {datetime.now().strftime('%d/%m/%Y')}"), align="R", ln=1)
+    pdf.set_x(10)
     pdf.set_y(58)
     pdf.draw_section_header("Traitement prescrit")
     for ligne in lignes:
         med = ligne["med"]
+        pdf.set_x(10)
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*COLOR_GREEN)
         addictif_tag = " [RISQUE ADDICTION]" if med.get("addictif") else ""
         pdf.multi_cell(190, 5, clean_pdf_text(f"{med['nom']}{addictif_tag}"))
+        pdf.set_x(10)
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(*COLOR_TEXT_DARK)
         posologie = f"Posologie : {ligne['frequence']}, {ligne['repas']} le repas -- Duree : {ligne['duree']} jour(s)"
         pdf.multi_cell(190, 5, clean_pdf_text(posologie))
+        pdf.set_x(10)
         symptomes = ", ".join(med.get("symptomes", []))
         pdf.multi_cell(190, 5, clean_pdf_text(f"Indique pour : {symptomes}"))
         if med.get("contre_indications"):
+            pdf.set_x(10)
             pdf.set_font("Helvetica", "I", 8)
             pdf.set_text_color(*COLOR_TEXT_MUTED)
             pdf.multi_cell(190, 4, clean_pdf_text("Contre-indications : " + " | ".join(med["contre_indications"])))
+        pdf.set_x(10)
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(*COLOR_TEXT_DARK)
         pdf.cell(190, 5, clean_pdf_text(f"Prix ligne : {ligne['prix_ligne']} $"), ln=1, align="R")
         pdf.ln(3)
         pdf.set_draw_color(200, 200, 200)
         pdf.set_line_width(0.2)
+        pdf.set_x(10)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(3)
+    pdf.set_x(10)
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 12)
     pdf.set_text_color(*COLOR_GREEN)
@@ -1210,13 +1218,15 @@ FACTURATION_CATEGORIES = {
             "kit_perfusion": {"label": "Kit de perfusion / Soluté", "prix": 350},
             "kit_intraveineux": {"label": "Kit intraveineux complet", "prix": 450},
             "seringue": {"label": "Seringue stérile (unité)", "prix": 40},
+            "gants_steriles": {"label": "Gants stériles (boîte)", "prix": 60},
             "compresses": {"label": "Compresses stériles (lot)", "prix": 80},
             "garrot": {"label": "Garrot hémostatique", "prix": 150},
             "attelle": {"label": "Attelle de fixation", "prix": 200},
             "collier_cervical": {"label": "Collier cervical", "prix": 250},
             "masque_oxygene": {"label": "Masque à oxygène + bouteille", "prix": 400},
+            "kit_suture": {"label": "Kit de suture complet", "prix": 300},
             "defibrillateur_usage": {"label": "Utilisation défibrillateur (patch)", "prix": 500},
-            "Chaise roulante": {"label": "Location chaise roulante/ béquilles", "prix": 200},
+            "civiere": {"label": "Location civière / brancard", "prix": 200},
         },
     },
 }
