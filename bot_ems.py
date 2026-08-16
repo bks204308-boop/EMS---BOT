@@ -40,9 +40,25 @@ class DatabasePool:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     prenom TEXT,
                     nom TEXT,
-                    age TEXT,
+                    date_naissance TEXT,
+                    sexe TEXT,
                     groupe_sanguin TEXT,
                     allergies TEXT,
+                    maladies_chroniques TEXT,
+                    traitements TEXT,
+                    antecedents_chirurgicaux TEXT,
+                    taille TEXT,
+                    poids TEXT,
+                    pouls TEXT,
+                    respiration TEXT,
+                    vision TEXT,
+                    audition TEXT,
+                    medecin_ems TEXT,
+                    date_visite TEXT,
+                    observations TEXT,
+                    aptitude TEXT,
+                    recommandations TEXT,
+                    signature TEXT,
                     contact_urgence TEXT,
                     created_by INTEGER,
                     created_at TEXT,
@@ -50,6 +66,16 @@ class DatabasePool:
                     UNIQUE(prenom, nom)
                 )
             """)
+            # Migration douce : si la table existait déjà (ancien schéma, avant l'ajout
+            # du volume persistant), on ajoute les colonnes manquantes sans jamais
+            # supprimer ni écraser les données déjà enregistrées.
+            async with self.conn.execute("PRAGMA table_info(dossiers_personnel)") as cursor:
+                existing_cols = {row["name"] async for row in cursor}
+            for col in _PATIENT_COLUMNS:
+                if col not in existing_cols:
+                    await self.conn.execute(f"ALTER TABLE dossiers_personnel ADD COLUMN {col} TEXT")
+            await self.conn.commit()
+
             await self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS dossiers_intervention (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,31 +91,57 @@ class DatabasePool:
                     created_at TEXT
                 )
             """)
+            await self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS certificats_ppa (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    patient_prenom TEXT,
+                    patient_nom TEXT,
+                    score INTEGER,
+                    total INTEGER,
+                    reussite INTEGER,
+                    created_by INTEGER,
+                    created_by_name TEXT,
+                    created_at TEXT
+                )
+            """)
             await self.conn.commit()
 
 db = DatabasePool()
 
+# Colonnes modifiables de dossiers_personnel (hors id/prenom/nom/created_at/updated_at)
+_PATIENT_COLUMNS = [
+    "date_naissance", "sexe", "groupe_sanguin", "allergies", "maladies_chroniques",
+    "traitements", "antecedents_chirurgicaux", "taille", "poids", "pouls",
+    "respiration", "vision", "audition", "medecin_ems", "date_visite",
+    "observations", "aptitude", "recommandations", "signature", "contact_urgence",
+]
+
 # ---------- FONCTIONS DE BASE DE DONNÉES (ASYNC / SQLite) ----------
-async def save_dossier_personnel(
-    prenom: str,
-    nom: str,
-    age: str,
-    groupe_sanguin: str,
-    allergies: str,
-    contact_urgence: str,
-    created_by: int,
-):
+async def save_dossier_personnel(prenom: str, nom: str, created_by: int, **fields):
+    """Crée ou met à jour un dossier patient. Les champs non fournis (ou vides) conservent
+    la valeur déjà existante en base — on ne perd jamais d'informations enregistrées."""
+    existing = await get_dossier_personnel(prenom, nom)
+    merged = {}
+    for col in _PATIENT_COLUMNS:
+        value = fields.get(col)
+        if value:
+            merged[col] = value
+        elif existing:
+            merged[col] = existing.get(col) or ""
+        else:
+            merged[col] = ""
     now = datetime.now(timezone.utc).isoformat()
-    await db.conn.execute("""
-        INSERT INTO dossiers_personnel (prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    columns_sql = ", ".join(_PATIENT_COLUMNS)
+    placeholders = ", ".join("?" for _ in _PATIENT_COLUMNS)
+    update_sql = ", ".join(f"{c}=excluded.{c}" for c in _PATIENT_COLUMNS)
+    values = [merged[c] for c in _PATIENT_COLUMNS]
+    await db.conn.execute(f"""
+        INSERT INTO dossiers_personnel (prenom, nom, {columns_sql}, created_by, created_at, updated_at)
+        VALUES (?, ?, {placeholders}, ?, ?, ?)
         ON CONFLICT(prenom, nom) DO UPDATE SET
-            age=excluded.age,
-            groupe_sanguin=excluded.groupe_sanguin,
-            allergies=excluded.allergies,
-            contact_urgence=excluded.contact_urgence,
+            {update_sql},
             updated_at=excluded.updated_at
-    """, (prenom, nom, age, groupe_sanguin, allergies, contact_urgence, created_by, now, now))
+    """, (prenom, nom, *values, created_by, now, now))
     await db.conn.commit()
 
 async def get_dossier_personnel(prenom: str, nom: str) -> Optional[dict]:
@@ -165,6 +217,22 @@ async def delete_intervention(record_id: int) -> bool:
 async def update_statut_facture(record_id: int, statut: str):
     await db.conn.execute("UPDATE dossiers_intervention SET statut_facture = ? WHERE id = ?", (statut, record_id))
     await db.conn.commit()
+
+async def save_certificat_ppa(patient_prenom: str, patient_nom: str, score: int, total: int, reussite: bool, created_by: int, created_by_name: str) -> int:
+    cursor = await db.conn.execute("""
+        INSERT INTO certificats_ppa (patient_prenom, patient_nom, score, total, reussite, created_by, created_by_name, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (patient_prenom, patient_nom, score, total, 1 if reussite else 0, created_by, created_by_name, datetime.now(timezone.utc).isoformat()))
+    await db.conn.commit()
+    return cursor.lastrowid
+
+async def get_dernier_certificat_ppa(prenom: str, nom: str) -> Optional[dict]:
+    async with db.conn.execute(
+        "SELECT * FROM certificats_ppa WHERE patient_prenom = ? AND patient_nom = ? ORDER BY id DESC LIMIT 1",
+        (prenom, nom)
+    ) as cursor:
+        row = await cursor.fetchone()
+        return dict(row) if row else None
 
 # ---------- EXPORT PDF ----------
 COLOR_BLUE = (0, 102, 153)
@@ -278,7 +346,7 @@ def generate_pdf_dossier_medical(data: dict, footer_info: str = "") -> io.BytesI
     pdf.cell(80, 6, clean_pdf_text(f"Date de visite : {data.get('date_visite', 'N/A')}"), align="R", ln=1)
     pdf.set_x(14)
     pdf.set_font("Helvetica", "", 9)
-    info_sub = f"Age : {data.get('age', 'N/A')} ans  |  Sexe : {data.get('sexe', 'N/A')}  |  Medecin : {data.get('medecin_ems', 'N/A')}"
+    info_sub = f"Date de naissance : {data.get('date_naissance', 'N/A')}  |  Sexe : {data.get('sexe', 'N/A')}  |  Medecin : {data.get('medecin_ems', 'N/A')}"
     pdf.cell(180, 5, clean_pdf_text(info_sub), ln=1)
     pdf.set_y(62)
     pdf.draw_section_header("Antecedents Medicaux")
@@ -483,44 +551,70 @@ class FacturationFinalView(SafeView):
         await interaction.response.edit_message(embed=embed, view=self)
 
 # ---------- FORMULAIRES : DOSSIER MÉDICAL ----------
-async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dict):
-    embed = discord.Embed(title="**__🩺 Dossier Médical – Visite Standard__**", color=discord.Color.blue())
+def build_dossier_complet_embed(dossier: dict, titre: str = "🩺 Dossier Médical") -> discord.Embed:
+    """Construit l'embed complet d'un dossier patient (identique à celui affiché à la création),
+    à partir des données stockées en base de données."""
+    embed = discord.Embed(title=f"**__{titre} — {dossier['prenom']} {dossier['nom']}__**", color=discord.Color.blue())
     embed.add_field(name="**__Identité du patient__**", value="\u200b", inline=False)
-    embed.add_field(name="**Prénom**", value=data["prenom"], inline=True)
-    embed.add_field(name="**Nom**", value=data["nom"], inline=True)
-    embed.add_field(name="**Âge**", value=data["age"], inline=True)
-    embed.add_field(name="**Sexe**", value=data["sexe"], inline=True)
-    embed.add_field(name="**Date de la visite**", value=data["date_visite"], inline=True)
-    embed.add_field(name="**Médecin / EMS**", value=data["medecin_ems"], inline=True)
+    embed.add_field(name="**Prénom**", value=dossier["prenom"], inline=True)
+    embed.add_field(name="**Nom**", value=dossier["nom"], inline=True)
+    embed.add_field(name="**Date de naissance**", value=dossier.get("date_naissance") or "Non renseignée", inline=True)
+    embed.add_field(name="**Sexe**", value=dossier.get("sexe") or "N/A", inline=True)
+    embed.add_field(name="**Dernière visite**", value=dossier.get("date_visite") or "N/A", inline=True)
+    embed.add_field(name="**Médecin / EMS**", value=dossier.get("medecin_ems") or "N/A", inline=True)
     embed.add_field(name="\n```Antécédents médicaux```", value="\u200b", inline=False)
-    embed.add_field(name="Allergies", value=data["allergies"] or "Aucune", inline=True)
-    embed.add_field(name="Maladies chroniques", value=data["maladies_chroniques"] or "Aucune", inline=True)
-    embed.add_field(name="Traitement(s) actuel(s)", value=data["traitements"] or "Non", inline=True)
-    embed.add_field(name="Antécédents chirurgicaux", value=data["antecedents_chirurgicaux"] or "Non", inline=True)
-    embed.add_field(name="\n```Examen clinique```", value="\u200b", inline=False)
-    embed.add_field(name="Taille", value=f"{data['taille']} cm" if data["taille"] else "N/A", inline=True)
-    embed.add_field(name="Poids", value=f"{data['poids']} kg" if data["poids"] else "N/A", inline=True)
-    embed.add_field(name="Groupe sanguin", value=data.get("groupe_sanguin") or "❌ Non déterminé (faire une analyse)", inline=True)
-    embed.add_field(name="Pouls", value=data["pouls"] or "N/A", inline=True)
-    embed.add_field(name="Respiration", value=data["respiration"] or "N/A", inline=True)
-    embed.add_field(name="Vision", value=data["vision"] or "N/A", inline=True)
-    embed.add_field(name="Audition", value=data["audition"] or "N/A", inline=True)
-    embed.add_field(name="\n```Observations du médecin```", value=data["observations"] or "Aucune observation", inline=False)
+    embed.add_field(name="Allergies", value=dossier.get("allergies") or "Aucune", inline=True)
+    embed.add_field(name="Maladies chroniques", value=dossier.get("maladies_chroniques") or "Aucune", inline=True)
+    embed.add_field(name="Traitement(s) actuel(s)", value=dossier.get("traitements") or "Non", inline=True)
+    embed.add_field(name="Antécédents chirurgicaux", value=dossier.get("antecedents_chirurgicaux") or "Non", inline=True)
+    embed.add_field(name="\n```Dernier examen clinique```", value="\u200b", inline=False)
+    embed.add_field(name="Taille", value=f"{dossier['taille']} cm" if dossier.get("taille") else "N/A", inline=True)
+    embed.add_field(name="Poids", value=f"{dossier['poids']} kg" if dossier.get("poids") else "N/A", inline=True)
+    embed.add_field(name="Groupe sanguin", value=dossier.get("groupe_sanguin") or "❌ Non déterminé (faire une analyse)", inline=True)
+    embed.add_field(name="Pouls", value=dossier.get("pouls") or "N/A", inline=True)
+    embed.add_field(name="Respiration", value=dossier.get("respiration") or "N/A", inline=True)
+    embed.add_field(name="Vision", value=dossier.get("vision") or "N/A", inline=True)
+    embed.add_field(name="Audition", value=dossier.get("audition") or "N/A", inline=True)
+    embed.add_field(name="\n```Observations du médecin```", value=dossier.get("observations") or "Aucune observation", inline=False)
     embed.add_field(name="\n```Conclusion```", value="\u200b", inline=False)
-    embed.add_field(name="Aptitude", value=data["aptitude"] or "Non spécifié", inline=True)
-    embed.add_field(name="Recommandations", value=data["recommandations"] or "Aucun suivi nécessaire", inline=True)
-    embed.add_field(name="\n**Signature & cachet du médecin**", value=data["signature"] or "Non signé", inline=False)
-    embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
+    embed.add_field(name="Aptitude", value=dossier.get("aptitude") or "Non spécifié", inline=True)
+    embed.add_field(name="Recommandations", value=dossier.get("recommandations") or "Aucun suivi nécessaire", inline=True)
+    embed.add_field(name="\n**Signature & cachet du médecin**", value=dossier.get("signature") or "Non signé", inline=False)
+    if dossier.get("contact_urgence"):
+        embed.add_field(name="\n**Contact d'urgence**", value=dossier["contact_urgence"], inline=False)
+    if dossier.get("updated_at"):
+        embed.set_footer(text=f"Dossier mis à jour le {dossier['updated_at'][:10]}")
+    return embed
 
+async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dict):
     await save_dossier_personnel(
         prenom=data["prenom"],
         nom=data["nom"],
-        age=data["age"],
-        groupe_sanguin="",  # sera rempli par analyse
-        allergies=data["allergies"],
-        contact_urgence=f"Visite du {data['date_visite']} - Dr {data['medecin_ems']}",
         created_by=interaction.user.id,
+        date_naissance=data["date_naissance"],
+        sexe=data["sexe"],
+        date_visite=data["date_visite"],
+        medecin_ems=data["medecin_ems"],
+        allergies=data["allergies"],
+        maladies_chroniques=data["maladies_chroniques"],
+        traitements=data["traitements"],
+        antecedents_chirurgicaux=data["antecedents_chirurgicaux"],
+        taille=data["taille"],
+        poids=data["poids"],
+        pouls=data["pouls"],
+        respiration=data["respiration"],
+        vision=data["vision"],
+        audition=data["audition"],
+        observations=data["observations"],
+        aptitude=data["aptitude"],
+        recommandations=data["recommandations"],
+        signature=data["signature"],
+        contact_urgence=f"Visite du {data['date_visite']} - Dr {data['medecin_ems']}",
     )
+
+    dossier_complet = await get_dossier_personnel(data["prenom"], data["nom"])
+    embed = build_dossier_complet_embed(dossier_complet, titre="🩺 Dossier Médical – Visite Standard")
+    embed.set_footer(text=f"Rempli par {interaction.user.display_name}")
 
     view = ExportPDFView(
         doc_type="dossier_medical",
@@ -598,7 +692,7 @@ class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Ant
 class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Identité"):
     prenom = discord.ui.TextInput(label="Prénom", placeholder="Ex: Jean")
     nom = discord.ui.TextInput(label="Nom de famille", placeholder="Ex: Dupont")
-    age = discord.ui.TextInput(label="Âge", placeholder="Ex: 45")
+    date_naissance = discord.ui.TextInput(label="Date de naissance", placeholder="JJ/MM/AAAA")
     sexe = discord.ui.TextInput(label="Sexe [M / F]", placeholder="M ou F", max_length=1)
     date_visite = discord.ui.TextInput(label="Date de la visite", placeholder="JJ/MM/AAAA")
 
@@ -606,7 +700,7 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
         data = {
             "prenom": self.prenom.value,
             "nom": self.nom.value,
-            "age": self.age.value,
+            "date_naissance": self.date_naissance.value,
             "sexe": self.sexe.value,
             "date_visite": self.date_visite.value,
         }
@@ -617,7 +711,7 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
 _MODIF_LABELS = {
     "nouveau_prenom": "Prénom",
     "nouveau_nom": "Nom",
-    "nouveau_age": "Âge",
+    "nouvelle_date_naissance": "Date de naissance",
     "nouveau_sexe": "Sexe",
     "nouvelle_date": "Date de la visite",
     "nouveau_medecin": "Médecin / EMS",
@@ -638,6 +732,29 @@ _MODIF_LABELS = {
     "nouvelle_signature": "Signature",
 }
 
+# Correspondance champ du formulaire de modification -> colonne en base de données
+_MODIF_TO_COLUMN = {
+    "nouvelle_date_naissance": "date_naissance",
+    "nouveau_sexe": "sexe",
+    "nouvelle_date": "date_visite",
+    "nouveau_medecin": "medecin_ems",
+    "nouvelles_allergies": "allergies",
+    "nouvelles_maladies": "maladies_chroniques",
+    "nouveaux_traitements": "traitements",
+    "nouveaux_antecedents": "antecedents_chirurgicaux",
+    "nouvelle_taille": "taille",
+    "nouveau_poids": "poids",
+    "nouveau_groupe": "groupe_sanguin",
+    "nouveau_pouls": "pouls",
+    "nouvelle_respiration": "respiration",
+    "nouvelle_vision": "vision",
+    "nouvelle_audition": "audition",
+    "nouvelles_observations": "observations",
+    "nouvelle_aptitude": "aptitude",
+    "nouvelles_recommandations": "recommandations",
+    "nouvelle_signature": "signature",
+}
+
 async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_prenom: str, ancien_nom: str, data: dict):
     dossier = await get_dossier_personnel(ancien_prenom, ancien_nom)
     if not dossier:
@@ -649,11 +766,8 @@ async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_pren
 
     nouveau_prenom = data.get("nouveau_prenom") or dossier["prenom"]
     nouveau_nom = data.get("nouveau_nom") or dossier["nom"]
-    nouveau_age = data.get("nouveau_age") or dossier["age"]
-    nouveau_groupe = data.get("nouveau_groupe") or dossier["groupe_sanguin"]
-    nouvelles_allergies = data.get("nouvelles_allergies") or dossier["allergies"]
-
     renomme = (nouveau_prenom != ancien_prenom) or (nouveau_nom != ancien_nom)
+
     if renomme:
         existant = await get_dossier_personnel(nouveau_prenom, nouveau_nom)
         if existant:
@@ -663,17 +777,30 @@ async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_pren
             )
             return
         await delete_dossier_personnel(ancien_prenom, ancien_nom)
+        # Le dossier n'existe plus sous nouveau_prenom/nouveau_nom : on doit reporter
+        # explicitement tout ce qui n'a pas été modifié, sinon la fusion automatique
+        # ne trouvera rien à conserver.
+        base_fields = {col: dossier.get(col) for col in _PATIENT_COLUMNS}
+    else:
+        base_fields = {}
 
-    # Enregistrement réel des modifications dans la base de données
+    # Champs réellement modifiés dans ce formulaire, mappés vers les colonnes DB
+    champs_modifies = {}
+    for form_key, column in _MODIF_TO_COLUMN.items():
+        value = data.get(form_key)
+        if value:
+            champs_modifies[column] = value
+
+    # Enregistrement réel : la fusion automatique de save_dossier_personnel conserve
+    # tout ce qui n'est pas explicitement fourni ici (sauf en cas de renommage, voir base_fields)
     await save_dossier_personnel(
         prenom=nouveau_prenom,
         nom=nouveau_nom,
-        age=nouveau_age,
-        groupe_sanguin=nouveau_groupe,
-        allergies=nouvelles_allergies,
-        contact_urgence=dossier["contact_urgence"],
         created_by=interaction.user.id,
+        **{**base_fields, **champs_modifies},
     )
+
+    dossier_final = await get_dossier_personnel(nouveau_prenom, nouveau_nom)
 
     updates = []
     for key, label in _MODIF_LABELS.items():
@@ -682,24 +809,13 @@ async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_pren
             suffix = " cm" if key == "nouvelle_taille" else (" kg" if key == "nouveau_poids" else "")
             updates.append(f"**{label} :** {value}{suffix}")
 
-    titre_dossier = f"{nouveau_prenom} {nouveau_nom}"
+    titre = "🩺 Modification du Dossier Médical"
     if renomme:
-        titre_dossier += f" *(anciennement {ancien_prenom} {ancien_nom})*"
+        titre += f" *(anciennement {ancien_prenom} {ancien_nom})*"
 
-    embed = discord.Embed(
-        title="**__🩺 Modification du Dossier Médical__**",
-        description=f"**Dossier :** {titre_dossier}",
-        color=discord.Color.gold()
-    )
+    embed = build_dossier_complet_embed(dossier_final, titre=titre)
     if updates:
-        embed.add_field(name="**Modifications effectuées**", value="\n".join(updates), inline=False)
-    else:
-        embed.add_field(name="Aucune modification", value="Aucun champ n'a été modifié.", inline=False)
-    embed.add_field(
-        name="✅ Enregistré",
-        value="Prénom, nom, âge, groupe sanguin et allergies ont été mis à jour dans le dossier du patient.",
-        inline=False
-    )
+        embed.insert_field_at(0, name="**✅ Modifications effectuées**", value="\n".join(updates), inline=False)
     embed.set_footer(text=f"Modifié par {interaction.user.display_name}")
     await interaction.response.send_message(embed=embed)
 
@@ -783,7 +899,7 @@ class DossierModifierModal3(discord.ui.Modal, title="Modification (3/6) - Antéc
 class DossierModifierModal2(discord.ui.Modal, title="Modification (2/6) - Nouvelle Identité"):
     nouveau_prenom = discord.ui.TextInput(label="Nouveau Prénom", placeholder="Nouveau prénom", required=False)
     nouveau_nom = discord.ui.TextInput(label="Nouveau Nom", placeholder="Nouveau nom", required=False)
-    nouveau_age = discord.ui.TextInput(label="Nouvel Âge", placeholder="Nouvel âge", required=False)
+    nouvelle_date_naissance = discord.ui.TextInput(label="Nouvelle Date de naissance", placeholder="JJ/MM/AAAA", required=False)
     nouveau_sexe = discord.ui.TextInput(label="Nouveau Sexe [M/F]", placeholder="M ou F", max_length=1, required=False)
     nouvelle_date = discord.ui.TextInput(label="Nouvelle Date de visite", placeholder="JJ/MM/AAAA", required=False)
 
@@ -797,7 +913,7 @@ class DossierModifierModal2(discord.ui.Modal, title="Modification (2/6) - Nouvel
         self.data.update({
             "nouveau_prenom": self.nouveau_prenom.value,
             "nouveau_nom": self.nouveau_nom.value,
-            "nouveau_age": self.nouveau_age.value,
+            "nouvelle_date_naissance": self.nouvelle_date_naissance.value,
             "nouveau_sexe": self.nouveau_sexe.value,
             "nouvelle_date": self.nouvelle_date.value,
         })
@@ -1174,6 +1290,180 @@ async def facturation(interaction: discord.Interaction, prenom: str, nom: str):
     embed = build_facturation_embed(session, note="Choisis une catégorie de soins pour commencer.")
     await interaction.response.send_message(embed=embed, view=FacturationCategoryView(session))
 
+# ---------- TEST PSYCHOTECHNIQUE PPA ----------
+PPA_SEUIL_REUSSITE = 7  # sur 10
+
+PPA_QUESTIONS = [
+    {
+        "question": "Un véhicule roule à 90 km/h. Le conducteur voit un obstacle à 60 mètres. Quelle est la meilleure réaction ?",
+        "options": [
+            ("Freiner immédiatement et fermement", True),
+            ("Accélérer pour dépasser l'obstacle", False),
+            ("Klaxonner puis freiner", False),
+            ("Continuer sans réagir", False),
+        ],
+    },
+    {
+        "question": "Complétez la suite logique : 2, 4, 8, 16, ...",
+        "options": [("24", False), ("32", True), ("18", False), ("20", False)],
+    },
+    {
+        "question": "Face à une situation d'urgence avec plusieurs blessés, quelle est la priorité ?",
+        "options": [
+            ("Trier les patients selon la gravité (triage)", True),
+            ("Soigner le premier arrivé sur les lieux", False),
+            ("Attendre les ordres avant d'agir", False),
+            ("S'occuper du patient le plus proche", False),
+        ],
+    },
+    {
+        "question": "Quel mot ne appartient pas à la même catégorie que les autres : Ambulance, Camion, Vélo, Hôpital ?",
+        "options": [("Ambulance", False), ("Camion", False), ("Vélo", False), ("Hôpital", True)],
+    },
+    {
+        "question": "Sous forte pression et avec peu de temps, quelle attitude est la plus adaptée pour un intervenant ?",
+        "options": [
+            ("Rester calme et suivre les procédures apprises", True),
+            ("Improviser rapidement sans réfléchir", False),
+            ("Attendre que la pression redescende", False),
+            ("Déléguer systématiquement la décision", False),
+        ],
+    },
+    {
+        "question": "Un test montre un temps de réaction moyen de 350ms. Est-ce considéré comme : ",
+        "options": [("Rapide (normal)", True), ("Anormalement lent", False), ("Non mesurable", False), ("Dangereux", False)],
+    },
+    {
+        "question": "Quelle est l'attitude à adopter face à un collègue qui panique sur une intervention ?",
+        "options": [
+            ("Le rassurer avec des instructions claires et courtes", True),
+            ("L'ignorer et continuer seul", False),
+            ("Hausser le ton pour le faire réagir", False),
+            ("Quitter les lieux", False),
+        ],
+    },
+    {
+        "question": "Complétez : Si tous les patients stables doivent attendre, et que ce patient est stable, alors...",
+        "options": [
+            ("Ce patient doit attendre", True),
+            ("Ce patient est prioritaire", False),
+            ("Ce patient doit repartir", False),
+            ("On ne peut rien conclure", False),
+        ],
+    },
+    {
+        "question": "Quelle capacité est la plus sollicitée lors d'une intervention multi-victimes chaotique ?",
+        "options": [
+            ("La gestion du stress et la prise de décision rapide", True),
+            ("La mémoire à long terme", False),
+            ("La créativité artistique", False),
+            ("La vitesse de lecture", False),
+        ],
+    },
+    {
+        "question": "Un candidat hésite longuement avant chaque réponse à ce test. Cela peut indiquer un besoin de travailler :",
+        "options": [
+            ("La prise de décision sous contrainte de temps", True),
+            ("La force physique", False),
+            ("La conduite de véhicule", False),
+            ("Aucun lien avec l'aptitude au poste", False),
+        ],
+    },
+]
+
+class PPASession:
+    def __init__(self, prenom: str, nom: str):
+        self.prenom = prenom
+        self.nom = nom
+        self.index = 0
+        self.score = 0
+
+def build_ppa_question_embed(session: PPASession) -> discord.Embed:
+    q = PPA_QUESTIONS[session.index]
+    embed = discord.Embed(
+        title="🧠 Test Psychotechnique PPA",
+        description=f"**Candidat :** {session.prenom} {session.nom}\n\n**Question {session.index + 1}/{len(PPA_QUESTIONS)}**\n\n{q['question']}",
+        color=discord.Color.purple()
+    )
+    embed.set_footer(text="Contenu fictif pour RP — sélectionnez une réponse ci-dessous")
+    return embed
+
+class PPAAnswerSelect(discord.ui.Select):
+    def __init__(self, session: PPASession):
+        self.session = session
+        q = PPA_QUESTIONS[session.index]
+        options = [discord.SelectOption(label=label[:100], value=str(i)) for i, (label, _) in enumerate(q["options"])]
+        super().__init__(placeholder="Choisis ta réponse...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        q = PPA_QUESTIONS[self.session.index]
+        _, correct = q["options"][int(self.values[0])]
+        if correct:
+            self.session.score += 1
+        self.session.index += 1
+
+        if self.session.index >= len(PPA_QUESTIONS):
+            reussite = self.session.score >= PPA_SEUIL_REUSSITE
+            record_id = await save_certificat_ppa(
+                patient_prenom=self.session.prenom,
+                patient_nom=self.session.nom,
+                score=self.session.score,
+                total=len(PPA_QUESTIONS),
+                reussite=reussite,
+                created_by=interaction.user.id,
+                created_by_name=interaction.user.display_name,
+            )
+            embed = discord.Embed(
+                title="✅ Certificat PPA délivré" if reussite else "❌ Test PPA non validé",
+                description=f"**Candidat :** {self.session.prenom} {self.session.nom}",
+                color=discord.Color.green() if reussite else discord.Color.red()
+            )
+            embed.add_field(name="Score", value=f"**{self.session.score} / {len(PPA_QUESTIONS)}**", inline=True)
+            embed.add_field(name="Seuil de réussite", value=f"{PPA_SEUIL_REUSSITE} / {len(PPA_QUESTIONS)}", inline=True)
+            embed.add_field(
+                name="Résultat",
+                value="🏅 Certificat PPA obtenu — le candidat est déclaré apte." if reussite else "Le candidat n'a pas atteint le score requis. Un nouveau passage est possible.",
+                inline=False
+            )
+            embed.set_footer(text=f"Test passé le {datetime.now().strftime('%d/%m/%Y à %H:%M')} • Dossier n°{record_id} • Évalué par {interaction.user.display_name}")
+            await interaction.response.edit_message(embed=embed, view=None)
+        else:
+            embed = build_ppa_question_embed(self.session)
+            await interaction.response.edit_message(embed=embed, view=PPAQuestionView(self.session))
+
+class PPAQuestionView(SafeView):
+    def __init__(self, session: PPASession):
+        super().__init__(timeout=300)
+        self.add_item(PPAAnswerSelect(session))
+
+@bot.tree.command(name="test_ppa", description="Faire passer le test psychotechnique PPA à un candidat")
+@app_commands.describe(prenom="Prénom du candidat", nom="Nom du candidat")
+async def test_ppa(interaction: discord.Interaction, prenom: str, nom: str):
+    session = PPASession(prenom, nom)
+    embed = build_ppa_question_embed(session)
+    await interaction.response.send_message(embed=embed, view=PPAQuestionView(session))
+
+@bot.tree.command(name="ppa_resultat", description="Voir le dernier résultat du test PPA d'un candidat")
+@app_commands.describe(prenom="Prénom du candidat", nom="Nom du candidat")
+async def ppa_resultat(interaction: discord.Interaction, prenom: str, nom: str):
+    certificat = await get_dernier_certificat_ppa(prenom, nom)
+    if not certificat:
+        await interaction.response.send_message(
+            f"Aucun test PPA trouvé pour **{prenom} {nom}**. Utilisez `/test_ppa`.",
+            ephemeral=True
+        )
+        return
+    reussite = bool(certificat["reussite"])
+    embed = discord.Embed(
+        title="🏅 Certificat PPA" if reussite else "📋 Dernier résultat PPA",
+        description=f"**Candidat :** {certificat['patient_prenom']} {certificat['patient_nom']}",
+        color=discord.Color.green() if reussite else discord.Color.red()
+    )
+    embed.add_field(name="Score", value=f"{certificat['score']} / {certificat['total']}", inline=True)
+    embed.add_field(name="Résultat", value="✅ Réussi" if reussite else "❌ Non validé", inline=True)
+    embed.set_footer(text=f"Passé le {certificat['created_at'][:10]} • Évalué par {certificat['created_by_name']}")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
 # ---------- COMMANDES ----------
 
 # GESTION DES PATIENTS
@@ -1191,9 +1481,6 @@ async def patient_creer(interaction: discord.Interaction, prenom: str, nom: str)
     await save_dossier_personnel(
         prenom=prenom,
         nom=nom,
-        age="",
-        groupe_sanguin="",
-        allergies="",
         contact_urgence=f"Créé par {interaction.user.display_name} le {datetime.now(timezone.utc).strftime('%d/%m/%Y')}",
         created_by=interaction.user.id,
     )
@@ -1284,11 +1571,8 @@ async def patient_modifier_nom(
     await save_dossier_personnel(
         prenom=nouveau_prenom,
         nom=nouveau_nom,
-        age=dossier["age"],
-        groupe_sanguin=dossier["groupe_sanguin"],
-        allergies=dossier["allergies"],
-        contact_urgence=dossier["contact_urgence"],
         created_by=interaction.user.id,
+        **{col: dossier.get(col) for col in _PATIENT_COLUMNS},
     )
 
     embed = discord.Embed(
@@ -1344,11 +1628,7 @@ async def dossier_voir(interaction: discord.Interaction, identifiant: str):
         )
         return
 
-    embed = discord.Embed(title=f"📋 Dossier — {dossier['prenom']} {dossier['nom']}", color=discord.Color.blue())
-    embed.add_field(name="Âge", value=dossier["age"] or "N/A", inline=True)
-    embed.add_field(name="Groupe sanguin", value=dossier["groupe_sanguin"] or "❌ Non déterminé", inline=True)
-    embed.add_field(name="Allergies / Antécédents", value=dossier["allergies"] or "Aucun", inline=False)
-    embed.add_field(name="Contact d'urgence", value=dossier["contact_urgence"] or "Non renseigné", inline=False)
+    embed = build_dossier_complet_embed(dossier, titre="📋 Dossier")
 
     interventions = await get_interventions_for_patient(dossier["prenom"], dossier["nom"])
     if interventions:
@@ -1368,27 +1648,9 @@ async def dossier_afficher(interaction: discord.Interaction, identifiant: str):
         )
         return
 
-    embed = discord.Embed(
-        title=f"📋 Dossier Médical — {dossier['prenom']} {dossier['nom']}",
-        color=discord.Color.blue()
-    )
-    embed.add_field(name="Âge", value=dossier["age"] or "Non renseigné", inline=True)
-    embed.add_field(
-        name="Groupe sanguin",
-        value=dossier["groupe_sanguin"] or "❌ Non déterminé (faire une analyse)",
-        inline=True
-    )
-    embed.add_field(
-        name="Allergies / Antécédents",
-        value=dossier["allergies"] or "Aucun",
-        inline=False
-    )
-    embed.add_field(
-        name="Contact d'urgence",
-        value=dossier["contact_urgence"] or "Non renseigné",
-        inline=False
-    )
-    embed.set_footer(text=f"Dossier créé le {dossier['created_at'][:10]} • Mis à jour le {dossier['updated_at'][:10]}")
+    embed = build_dossier_complet_embed(dossier, titre="📋 Dossier Médical")
+    if dossier.get("created_at") and dossier.get("updated_at"):
+        embed.set_footer(text=f"Dossier créé le {dossier['created_at'][:10]} • Mis à jour le {dossier['updated_at'][:10]}")
 
     await interaction.response.send_message(embed=embed, ephemeral=False)  # Permanent
 
@@ -1524,34 +1786,20 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, 
     donneur_pour = ", ".join(compat.get("donneur_pour", []))
     receveur_de = ", ".join(compat.get("receveur_de", []))
 
+    # La fusion automatique de save_dossier_personnel conserve tout le reste du dossier :
+    # seul le groupe sanguin change, rien n'est écrasé.
     await save_dossier_personnel(
         prenom=prenom,
         nom=nom,
-        age=dossier["age"] or "",
-        groupe_sanguin=groupe,
-        allergies=dossier["allergies"] or "",
-        contact_urgence=dossier["contact_urgence"] or f"Analyse sanguine du {datetime.now().strftime('%d/%m/%Y')}",
         created_by=interaction.user.id,
+        groupe_sanguin=groupe,
+        contact_urgence=dossier.get("contact_urgence") or f"Analyse sanguine du {datetime.now().strftime('%d/%m/%Y')}",
     )
 
     dossier_updated = await get_dossier_personnel(prenom, nom)
 
-    embed_final = discord.Embed(
-        title=f"🩺 Dossier Médical — {dossier_updated['prenom']} {dossier_updated['nom']}",
-        color=discord.Color.green()
-    )
-    embed_final.add_field(name="Âge", value=dossier_updated["age"] or "Non renseigné", inline=True)
-    embed_final.add_field(name="Groupe sanguin", value=dossier_updated["groupe_sanguin"] or "❌ Non déterminé", inline=True)
-    embed_final.add_field(
-        name="Allergies / Antécédents",
-        value=dossier_updated["allergies"] or "Aucun",
-        inline=False
-    )
-    embed_final.add_field(
-        name="Contact d'urgence",
-        value=dossier_updated["contact_urgence"] or "Non renseigné",
-        inline=False
-    )
+    embed_final = build_dossier_complet_embed(dossier_updated, titre="🩺 Dossier Médical")
+    embed_final.color = discord.Color.green()
 
     embed_final.add_field(
         name="🩸 Compatibilités sanguines",
