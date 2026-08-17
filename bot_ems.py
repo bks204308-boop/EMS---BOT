@@ -857,13 +857,9 @@ async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dic
         filename=f"dossier_medical_{data['prenom']}_{data['nom']}.pdf",
         footer=interaction.user.display_name,
     )
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, view=view)
-        else:
-            await interaction.response.send_message(embed=embed, view=view)
-    except discord.HTTPException:
-        await interaction.followup.send(embed=embed, view=view)
+
+    # Envoi via followup car l'interaction est déjà répondue (modal)
+    await interaction.followup.send(embed=embed, view=view)
 
 class DossierMedicalModal4(discord.ui.Modal, title="Dossier Médical (4/4) - Conclusion"):
     audition = discord.ui.TextInput(label="Audition", placeholder="Normale / Diminuée", required=False)
@@ -1222,13 +1218,8 @@ async def _finaliser_rapport_intervention(interaction: discord.Interaction, data
         footer=interaction.user.display_name,
         record_id=record_id,
     )
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, view=view)
-        else:
-            await interaction.response.send_message(embed=embed, view=view)
-    except discord.HTTPException:
-        await interaction.followup.send(embed=embed, view=view)
+
+    await interaction.followup.send(embed=embed, view=view)
 
 class RapportInterventionModal4(discord.ui.Modal, title="Rapport EMS (4/4) - Conclusion"):
     conclusion = discord.ui.TextInput(label="Conclusion de l'intervention", placeholder="Patient stabilisé / transporté / décédé malgré les soins", style=discord.TextStyle.paragraph)
@@ -1389,13 +1380,15 @@ FACTURATION_CATEGORIES = {
             "kit_perfusion": {"label": "Kit de perfusion / Soluté", "prix": 350, "stock_key": None, "stock_qty": 1},
             "kit_intraveineux": {"label": "Kit intraveineux complet", "prix": 450, "stock_key": None, "stock_qty": 1},
             "seringue": {"label": "Seringue stérile (unité)", "prix": 40, "stock_key": "seringue", "stock_qty": 1},
+            "gants_steriles": {"label": "Gants stériles (boîte)", "prix": 60, "stock_key": "gants_steriles", "stock_qty": 1},
             "compresses": {"label": "Compresses stériles (lot)", "prix": 80, "stock_key": "compresses", "stock_qty": 1},
             "garrot": {"label": "Garrot hémostatique", "prix": 150, "stock_key": "garrot", "stock_qty": 1},
             "attelle": {"label": "Attelle de fixation", "prix": 200, "stock_key": "attelle", "stock_qty": 1},
             "collier_cervical": {"label": "Collier cervical", "prix": 250, "stock_key": "collier_cervical", "stock_qty": 1},
             "masque_oxygene": {"label": "Masque à oxygène + bouteille", "prix": 400, "stock_key": "masque_oxygene", "stock_qty": 1},
+            "kit_suture": {"label": "Kit de suture complet", "prix": 300, "stock_key": "kit_suture", "stock_qty": 1},
             "defibrillateur_usage": {"label": "Utilisation défibrillateur (patch)", "prix": 500, "stock_key": "defibrillateur", "stock_qty": 1},
-            "Chaise roulante": {"label": "Location chaise roulante / béquilles", "prix": 200, "stock_key": "civiere", "stock_qty": 1},
+            "civiere": {"label": "Location civière / brancard", "prix": 200, "stock_key": "civiere", "stock_qty": 1},
         },
     },
 }
@@ -2168,13 +2161,7 @@ async def _finaliser_autopsie(interaction: discord.Interaction, data: dict):
     embed.set_footer(text=f"Rapport n°{record_id} • Établi par {interaction.user.display_name}")
 
     view = AutopsieView(record_id, data, footer=interaction.user.display_name)
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, view=view)
-        else:
-            await interaction.response.send_message(embed=embed, view=view)
-    except discord.HTTPException:
-        await interaction.followup.send(embed=embed, view=view)
+    await interaction.followup.send(embed=embed, view=view)
 
 # ---------- COMMANDES ----------
 @bot.tree.command(name="patient_creer", description="Créer un nouveau patient (prénom et nom)")
@@ -2578,13 +2565,12 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, 
         created_by=interaction.user.id,
         groupe_sanguin=groupe,
         contact_urgence=dossier.get("contact_urgence") or f"Analyse sanguine du {datetime.now().strftime('%d/%m/%Y')}",
-        # On conserve les allergies existantes (ne pas les écraser)
-        allergies=dossier.get("allergies"),
+        allergies=dossier.get("allergies"),  # conservé
     )
 
     dossier_updated = await get_dossier_personnel(prenom, nom)
 
-    # Embed final : on affiche le groupe, les allergies et les compatibilités
+    # Embed final : affiche le groupe, les allergies et les compatibilités
     embed_final = discord.Embed(
         title="🩸 Résultat de l'Analyse Sanguine",
         description=f"**Patient :** {prenom} {nom}",
