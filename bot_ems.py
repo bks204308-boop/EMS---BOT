@@ -16,7 +16,7 @@ from fpdf import FPDF
 from PIL import Image, ImageDraw
 
 TOKEN = os.getenv("DISCORD_TOKEN")
-DB_PATH = os.getenv("DB_PATH", "bot_ems.db")  # Base de données SQLite locale (fichier)
+DB_PATH = os.getenv("DB_PATH", "bot_ems.db")
 
 logger = logging.getLogger("rp_medical_bot")
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +34,7 @@ async def on_ready():
         logger.exception("❌ Échec de la synchronisation des commandes slash.")
     logger.info("✅ Bot connecté en tant que %s.", bot.user)
 
-# ---------- CONNEXION & BASE DE DONNÉES (SQLite) ----------
+# ---------- CONNEXION & BASE DE DONNÉES ----------
 class DatabasePool:
     def __init__(self):
         self.conn: Optional[aiosqlite.Connection] = None
@@ -75,9 +75,6 @@ class DatabasePool:
                     UNIQUE(prenom, nom)
                 )
             """)
-            # Migration douce : si la table existait déjà (ancien schéma, avant l'ajout
-            # du volume persistant), on ajoute les colonnes manquantes sans jamais
-            # supprimer ni écraser les données déjà enregistrées.
             async with self.conn.execute("PRAGMA table_info(dossiers_personnel)") as cursor:
                 existing_cols = {row["name"] async for row in cursor}
             for col in _PATIENT_COLUMNS:
@@ -113,11 +110,51 @@ class DatabasePool:
                     created_at TEXT
                 )
             """)
+            # Tables des stocks et autopsies
+            await self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS stocks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nom TEXT UNIQUE NOT NULL,
+                    quantite INTEGER NOT NULL DEFAULT 0,
+                    seuil_alerte INTEGER NOT NULL DEFAULT 5
+                )
+            """)
+            await self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS autopsies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    patient_prenom TEXT NOT NULL,
+                    patient_nom TEXT NOT NULL,
+                    date_deces TEXT NOT NULL,
+                    heure_estimee TEXT,
+                    cause_probable TEXT,
+                    type_arme TEXT,
+                    traces_substances TEXT,
+                    conclusions TEXT,
+                    medecin_legiste TEXT,
+                    date_autopsie TEXT,
+                    created_by INTEGER,
+                    created_at TEXT
+                )
+            """)
+            # Insertion des stocks de base
+            for nom_stock in ["poche_sang", "kit_suture", "defibrillateur", "seringue",
+                              "gants_steriles", "compresses", "garrot", "attelle",
+                              "collier_cervical", "masque_oxygene", "civiere"]:
+                await self.conn.execute(
+                    "INSERT OR IGNORE INTO stocks (nom, quantite, seuil_alerte) VALUES (?, ?, ?)",
+                    (nom_stock, 20, 5)
+                )
+            for medicament in ["paracetamol", "ibuprofene", "aspirine", "cyclizine", "lithium",
+                               "beta_bloquants", "captopril", "helicidine", "tramadol", "morphine",
+                               "loprazolam", "epinephrine", "cocillana"]:
+                await self.conn.execute(
+                    "INSERT OR IGNORE INTO stocks (nom, quantite, seuil_alerte) VALUES (?, ?, ?)",
+                    (f"medicament_{medicament}", 50, 10)
+                )
             await self.conn.commit()
 
 db = DatabasePool()
 
-# Colonnes modifiables de dossiers_personnel (hors id/prenom/nom/created_at/updated_at)
 _PATIENT_COLUMNS = [
     "date_naissance", "sexe", "groupe_sanguin", "allergies", "maladies_chroniques",
     "traitements", "antecedents_chirurgicaux", "taille", "poids", "pouls",
@@ -125,10 +162,8 @@ _PATIENT_COLUMNS = [
     "observations", "aptitude", "recommandations", "signature", "contact_urgence",
 ]
 
-# ---------- FONCTIONS DE BASE DE DONNÉES (ASYNC / SQLite) ----------
+# ---------- FONCTIONS BASE DE DONNÉES ----------
 async def save_dossier_personnel(prenom: str, nom: str, created_by: int, **fields):
-    """Crée ou met à jour un dossier patient. Les champs non fournis (ou vides) conservent
-    la valeur déjà existante en base — on ne perd jamais d'informations enregistrées."""
     existing = await get_dossier_personnel(prenom, nom)
     merged = {}
     for col in _PATIENT_COLUMNS:
@@ -238,6 +273,92 @@ async def save_certificat_ppa(patient_prenom: str, patient_nom: str, score: int,
 async def get_dernier_certificat_ppa(prenom: str, nom: str) -> Optional[dict]:
     async with db.conn.execute(
         "SELECT * FROM certificats_ppa WHERE patient_prenom = ? AND patient_nom = ? ORDER BY id DESC LIMIT 1",
+        (prenom, nom)
+    ) as cursor:
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+# ---------- FONCTIONS STOCKS ----------
+async def get_stock(nom: str) -> Optional[int]:
+    async with db.conn.execute("SELECT quantite FROM stocks WHERE nom = ?", (nom,)) as cursor:
+        row = await cursor.fetchone()
+        return row["quantite"] if row else None
+
+async def set_stock(nom: str, quantite: int):
+    await db.conn.execute(
+        "INSERT OR REPLACE INTO stocks (nom, quantite) VALUES (?, ?)",
+        (nom, quantite)
+    )
+    await db.conn.commit()
+
+async def decrement_stock(nom: str, qty: int = 1) -> bool:
+    stock = await get_stock(nom)
+    if stock is None or stock < qty:
+        return False
+    await db.conn.execute(
+        "UPDATE stocks SET quantite = quantite - ? WHERE nom = ?",
+        (qty, nom)
+    )
+    await db.conn.commit()
+    return True
+
+async def increment_stock(nom: str, qty: int = 1):
+    await db.conn.execute(
+        "UPDATE stocks SET quantite = quantite + ? WHERE nom = ?",
+        (qty, nom)
+    )
+    await db.conn.commit()
+
+async def get_all_stocks() -> List[dict]:
+    async with db.conn.execute("SELECT * FROM stocks ORDER BY nom") as cursor:
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+async def get_stock_threshold(nom: str) -> int:
+    async with db.conn.execute("SELECT seuil_alerte FROM stocks WHERE nom = ?", (nom,)) as cursor:
+        row = await cursor.fetchone()
+        return row["seuil_alerte"] if row else 5
+
+async def set_stock_threshold(nom: str, seuil: int):
+    await db.conn.execute(
+        "UPDATE stocks SET seuil_alerte = ? WHERE nom = ?",
+        (seuil, nom)
+    )
+    await db.conn.commit()
+
+# ---------- FONCTIONS AUTOPSIES ----------
+async def save_autopsie(data: dict, created_by: int) -> int:
+    cursor = await db.conn.execute("""
+        INSERT INTO autopsies (
+            patient_prenom, patient_nom, date_deces, heure_estimee,
+            cause_probable, type_arme, traces_substances, conclusions,
+            medecin_legiste, date_autopsie, created_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data["patient_prenom"], data["patient_nom"], data["date_deces"],
+        data["heure_estimee"], data["cause_probable"], data["type_arme"],
+        data["traces_substances"], data["conclusions"], data["medecin_legiste"],
+        data["date_autopsie"], created_by, datetime.now(timezone.utc).isoformat()
+    ))
+    await db.conn.commit()
+    return cursor.lastrowid
+
+async def get_autopsie(autopsie_id: int) -> Optional[dict]:
+    async with db.conn.execute("SELECT * FROM autopsies WHERE id = ?", (autopsie_id,)) as cursor:
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+async def search_autopsies(query: str, limit: int = 25) -> List[dict]:
+    async with db.conn.execute(
+        "SELECT * FROM autopsies WHERE patient_prenom LIKE ? OR patient_nom LIKE ? ORDER BY id DESC LIMIT ?",
+        (f"%{query}%", f"%{query}%", limit)
+    ) as cursor:
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+async def get_last_autopsie_for_patient(prenom: str, nom: str) -> Optional[dict]:
+    async with db.conn.execute(
+        "SELECT * FROM autopsies WHERE patient_prenom = ? AND patient_nom = ? ORDER BY id DESC LIMIT 1",
         (prenom, nom)
     ) as cursor:
         row = await cursor.fetchone()
@@ -535,7 +656,38 @@ def generate_pdf_ordonnance(patient_prenom: str, patient_nom: str, lignes: List[
     pdf.cell(190, 5, clean_pdf_text(f"Prescrit par : {footer_info} -- Document a conserver pour dossier RP"), align="C")
     return _export_buffer(pdf)
 
-# ---------- VIEWS ET BOUTONS ----------
+# --- PDF AUTOPSIE ---
+def generate_pdf_autopsie(data: dict, footer_info: str = "") -> io.BytesIO:
+    pdf = EMSPDF(doc_type="RAPPORT D'AUTOPSIE", primary_color=(80, 40, 40))
+    pdf.add_page()
+    pdf.set_fill_color(*COLOR_BG_LIGHT)
+    pdf.set_draw_color(80, 40, 40)
+    pdf.rect(10, 34, 190, 22, 'DF')
+    pdf.set_xy(14, 37)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(80, 40, 40)
+    pdf.cell(120, 6, clean_pdf_text(f"Patient : {data['patient_prenom']} {data['patient_nom']}"))
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*COLOR_TEXT_DARK)
+    pdf.cell(60, 6, clean_pdf_text(f"Date de l'autopsie : {data.get('date_autopsie', 'N/A')}"), align="R", ln=1)
+    pdf.set_y(60)
+    pdf.draw_section_header("Informations générales")
+    pdf.draw_key_value("Date du décès", data.get("date_deces", "N/A"))
+    pdf.draw_key_value("Heure estimée du décès", data.get("heure_estimee", "N/A"))
+    pdf.draw_key_value("Médecin légiste", data.get("medecin_legiste", "N/A"))
+    pdf.draw_section_header("Constatations")
+    pdf.draw_key_value("Cause probable", data.get("cause_probable", "Non déterminée"))
+    pdf.draw_key_value("Type d'arme / impact", data.get("type_arme", "N/A"))
+    pdf.draw_key_value("Traces de substances", data.get("traces_substances", "Aucune"))
+    pdf.draw_section_header("Conclusions du légiste")
+    pdf.draw_key_value("Conclusions", data.get("conclusions", "Aucune"))
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(120, 5, f"Rapport établi par : {clean_pdf_text(footer_info)}")
+    pdf.cell(70, 5, f"Signature : {clean_pdf_text(data.get('medecin_legiste') or 'Non signé')}", align="R")
+    return _export_buffer(pdf)
+
+# ---------- VIEWS ----------
 class SafeView(discord.ui.View):
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
         logger.error("Erreur dans le composant %s : %s", item, error)
@@ -619,10 +771,24 @@ class FacturationFinalView(SafeView):
         button.style = discord.ButtonStyle.secondary
         await interaction.response.edit_message(embed=embed, view=self)
 
-# ---------- FORMULAIRES : DOSSIER MÉDICAL ----------
+# --- Vue Autopsie ---
+class AutopsieView(SafeView):
+    def __init__(self, record_id: int, data: dict, footer: str = ""):
+        super().__init__(timeout=300)
+        self.record_id = record_id
+        self.data = data
+        self.footer = footer
+
+    @discord.ui.button(label="📄 Exporter en PDF", style=discord.ButtonStyle.secondary)
+    async def export_pdf(self, interaction: discord.Interaction, button: discord.ui.Button):
+        buf = generate_pdf_autopsie(self.data, footer_info=self.footer)
+        await interaction.response.send_message(
+            file=discord.File(buf, filename=f"autopsie_{self.record_id}.pdf"),
+            ephemeral=True
+        )
+
+# ---------- FORMULAIRES DOSSIER MÉDICAL ----------
 def build_dossier_complet_embed(dossier: dict, titre: str = "🩺 Dossier Médical") -> discord.Embed:
-    """Construit l'embed complet d'un dossier patient (identique à celui affiché à la création),
-    à partir des données stockées en base de données."""
     embed = discord.Embed(title=f"**__{titre} — {dossier['prenom']} {dossier['nom']}__**", color=discord.Color.blue())
     embed.add_field(name="**__Identité du patient__**", value="\u200b", inline=False)
     embed.add_field(name="**Prénom**", value=dossier["prenom"], inline=True)
@@ -691,7 +857,13 @@ async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dic
         filename=f"dossier_medical_{data['prenom']}_{data['nom']}.pdf",
         footer=interaction.user.display_name,
     )
-    await interaction.response.send_message(embed=embed, view=view)
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
+    except discord.HTTPException:
+        await interaction.followup.send(embed=embed, view=view)
 
 class DossierMedicalModal4(discord.ui.Modal, title="Dossier Médical (4/4) - Conclusion"):
     audition = discord.ui.TextInput(label="Audition", placeholder="Normale / Diminuée", required=False)
@@ -776,7 +948,7 @@ class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Iden
         next_view = NextStepView(DossierMedicalModal2(data), label="Étape 2/4 : Antécédents ➡️")
         await interaction.response.send_message("✅ **Étape 1/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-# ---------- FORMULAIRE : MODIFICATION ----------
+# ---------- MODIFICATION DOSSIER ----------
 _MODIF_LABELS = {
     "nouveau_prenom": "Prénom",
     "nouveau_nom": "Nom",
@@ -801,7 +973,6 @@ _MODIF_LABELS = {
     "nouvelle_signature": "Signature",
 }
 
-# Correspondance champ du formulaire de modification -> colonne en base de données
 _MODIF_TO_COLUMN = {
     "nouvelle_date_naissance": "date_naissance",
     "nouveau_sexe": "sexe",
@@ -846,22 +1017,16 @@ async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_pren
             )
             return
         await delete_dossier_personnel(ancien_prenom, ancien_nom)
-        # Le dossier n'existe plus sous nouveau_prenom/nouveau_nom : on doit reporter
-        # explicitement tout ce qui n'a pas été modifié, sinon la fusion automatique
-        # ne trouvera rien à conserver.
         base_fields = {col: dossier.get(col) for col in _PATIENT_COLUMNS}
     else:
         base_fields = {}
 
-    # Champs réellement modifiés dans ce formulaire, mappés vers les colonnes DB
     champs_modifies = {}
     for form_key, column in _MODIF_TO_COLUMN.items():
         value = data.get(form_key)
         if value:
             champs_modifies[column] = value
 
-    # Enregistrement réel : la fusion automatique de save_dossier_personnel conserve
-    # tout ce qui n'est pas explicitement fourni ici (sauf en cas de renommage, voir base_fields)
     await save_dossier_personnel(
         prenom=nouveau_prenom,
         nom=nouveau_nom,
@@ -1057,7 +1222,13 @@ async def _finaliser_rapport_intervention(interaction: discord.Interaction, data
         footer=interaction.user.display_name,
         record_id=record_id,
     )
-    await interaction.response.send_message(embed=embed, view=view)
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
+    except discord.HTTPException:
+        await interaction.followup.send(embed=embed, view=view)
 
 class RapportInterventionModal4(discord.ui.Modal, title="Rapport EMS (4/4) - Conclusion"):
     conclusion = discord.ui.TextInput(label="Conclusion de l'intervention", placeholder="Patient stabilisé / transporté / décédé malgré les soins", style=discord.TextStyle.paragraph)
@@ -1214,17 +1385,19 @@ FACTURATION_CATEGORIES = {
     "consommables": {
         "label": "🩹 Consommables médicaux",
         "items": {
-            "poche_sang": {"label": "Poche de sang (1 unité)", "prix": 900},
-            "kit_perfusion": {"label": "Kit de perfusion / Soluté", "prix": 350},
-            "kit_intraveineux": {"label": "Kit intraveineux complet", "prix": 450},
-            "seringue": {"label": "Seringue stérile (unité)", "prix": 40},
-            "compresses": {"label": "Compresses stériles (lot)", "prix": 80},
-            "garrot": {"label": "Garrot hémostatique", "prix": 150},
-            "attelle": {"label": "Attelle de fixation", "prix": 200},
-            "collier_cervical": {"label": "Collier cervical", "prix": 250},
-            "masque_oxygene": {"label": "Masque à oxygène + bouteille", "prix": 400},
-            "defibrillateur_usage": {"label": "Utilisation défibrillateur (patch)", "prix": 500},
-            "Chaise roulante": {"label": "Location Chaise roulante/ Béquilles", "prix": 200},
+            "poche_sang": {"label": "Poche de sang (1 unité)", "prix": 900, "stock_key": "poche_sang", "stock_qty": 1},
+            "kit_perfusion": {"label": "Kit de perfusion / Soluté", "prix": 350, "stock_key": None, "stock_qty": 1},
+            "kit_intraveineux": {"label": "Kit intraveineux complet", "prix": 450, "stock_key": None, "stock_qty": 1},
+            "seringue": {"label": "Seringue stérile (unité)", "prix": 40, "stock_key": "seringue", "stock_qty": 1},
+            "gants_steriles": {"label": "Gants stériles (boîte)", "prix": 60, "stock_key": "gants_steriles", "stock_qty": 1},
+            "compresses": {"label": "Compresses stériles (lot)", "prix": 80, "stock_key": "compresses", "stock_qty": 1},
+            "garrot": {"label": "Garrot hémostatique", "prix": 150, "stock_key": "garrot", "stock_qty": 1},
+            "attelle": {"label": "Attelle de fixation", "prix": 200, "stock_key": "attelle", "stock_qty": 1},
+            "collier_cervical": {"label": "Collier cervical", "prix": 250, "stock_key": "collier_cervical", "stock_qty": 1},
+            "masque_oxygene": {"label": "Masque à oxygène + bouteille", "prix": 400, "stock_key": "masque_oxygene", "stock_qty": 1},
+            "kit_suture": {"label": "Kit de suture complet", "prix": 300, "stock_key": "kit_suture", "stock_qty": 1},
+            "defibrillateur_usage": {"label": "Utilisation défibrillateur (patch)", "prix": 500, "stock_key": "defibrillateur", "stock_qty": 1},
+            "civiere": {"label": "Location civière / brancard", "prix": 200, "stock_key": "civiere", "stock_qty": 1},
         },
     },
 }
@@ -1232,7 +1405,7 @@ FACTURATION_CATEGORIES = {
 class FacturationSession:
     def __init__(self):
         self.total = 0
-        self.details: List[str] = []
+        self.details: List[dict] = []  # {"label": str, "qte": int, "stock_key": str, "stock_qty": int, "prix": int}
         self.patient_prenom: str = ""
         self.patient_nom: str = ""
 
@@ -1240,7 +1413,8 @@ def build_facturation_embed(session: FacturationSession, note: Optional[str] = N
     embed = discord.Embed(title="🧾 Facturation EMS", color=discord.Color.green())
     embed.add_field(name="Patient", value=f"{session.patient_prenom} {session.patient_nom}", inline=False)
     if session.details:
-        embed.add_field(name="Soins ajoutés", value="\n".join(f"• {d}" for d in session.details), inline=False)
+        details_text = "\n".join(f"• {d['qte']}x {d['label']} — {d['prix']} $" for d in session.details)
+        embed.add_field(name="Soins ajoutés", value=details_text, inline=False)
         embed.add_field(name="Total provisoire", value=f"**{session.total} $**", inline=False)
     else:
         embed.description = "Aucun soin ajouté pour le moment."
@@ -1248,7 +1422,143 @@ def build_facturation_embed(session: FacturationSession, note: Optional[str] = N
         embed.add_field(name="Étape actuelle", value=note, inline=False)
     return embed
 
-# ---------- ORDONNANCE MÉDICALE ----------
+class FacturationCategorySelect(discord.ui.Select):
+    def __init__(self, session: FacturationSession):
+        self.session = session
+        options = [discord.SelectOption(label=cat["label"][:100], value=key) for key, cat in FACTURATION_CATEGORIES.items()]
+        super().__init__(placeholder="Choisis une catégorie de soins...", options=options)
+    async def callback(self, interaction: discord.Interaction):
+        cat_key = self.values[0]
+        note = f"Catégorie : {FACTURATION_CATEGORIES[cat_key]['label']}"
+        embed = build_facturation_embed(self.session, note=note)
+        view = FacturationItemView(self.session, cat_key)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class FacturationCategoryView(SafeView):
+    def __init__(self, session: FacturationSession):
+        super().__init__(timeout=180)
+        self.add_item(FacturationCategorySelect(session))
+
+class FacturationItemSelect(discord.ui.Select):
+    def __init__(self, session: FacturationSession, cat_key: str):
+        self.session = session
+        self.cat_key = cat_key
+        items = FACTURATION_CATEGORIES[cat_key]["items"]
+        options = [discord.SelectOption(label=f"{v['label']} — {v['prix']} $", value=k) for k, v in items.items()]
+        super().__init__(placeholder="Sélectionne un soin...", min_values=1, max_values=1, options=options)
+    async def callback(self, interaction: discord.Interaction):
+        key = self.values[0]
+        item = FACTURATION_CATEGORIES[self.cat_key]["items"][key]
+        await interaction.response.send_modal(QuantityModal(self.session, key, item, self.cat_key))
+
+class QuantityModal(discord.ui.Modal, title="Quantité du soin"):
+    quantite = discord.ui.TextInput(label="Combien de fois ?", placeholder="Ex: 2", default="1")
+    def __init__(self, session: FacturationSession, item_key: str, item_data: dict, cat_key: str):
+        super().__init__()
+        self.session = session
+        self.item_key = item_key
+        self.item_data = item_data
+        self.cat_key = cat_key
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            qte = int(self.quantite.value)
+            if qte < 1: qte = 1
+            if qte > 99: qte = 99
+        except ValueError:
+            qte = 1
+        cout_total = self.item_data["prix"] * qte
+        self.session.total += cout_total
+        self.session.details.append({
+            "label": self.item_data["label"],
+            "qte": qte,
+            "stock_key": self.item_data.get("stock_key"),
+            "stock_qty": self.item_data.get("stock_qty", 1) * qte,
+            "prix": cout_total
+        })
+        embed = build_facturation_embed(self.session)
+        view = FacturationSummaryView(self.session)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class BackToCategoryButton(discord.ui.Button):
+    def __init__(self, session: FacturationSession):
+        super().__init__(label="↩️ Changer de catégorie", style=discord.ButtonStyle.secondary, row=1)
+        self.session = session
+    async def callback(self, interaction: discord.Interaction):
+        embed = build_facturation_embed(self.session)
+        view = FacturationCategoryView(self.session)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class FacturationItemView(SafeView):
+    def __init__(self, session: FacturationSession, cat_key: str):
+        super().__init__(timeout=180)
+        self.add_item(FacturationItemSelect(session, cat_key))
+        self.add_item(BackToCategoryButton(session))
+
+class FacturationSummaryView(SafeView):
+    def __init__(self, session: FacturationSession):
+        super().__init__(timeout=180)
+        self.session = session
+    @discord.ui.button(label="➕ Ajouter un autre soin", style=discord.ButtonStyle.secondary)
+    async def add_more(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = build_facturation_embed(self.session)
+        view = FacturationCategoryView(self.session)
+        await interaction.response.edit_message(embed=embed, view=view)
+    @discord.ui.button(label="✅ Terminer et facturer", style=discord.ButtonStyle.success)
+    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Décrémenter les stocks pour chaque soin consommable
+        for item in self.session.details:
+            stock_key = item.get("stock_key")
+            if stock_key:
+                qty = item.get("stock_qty", 1)
+                success = await decrement_stock(stock_key, qty)
+                if not success:
+                    await interaction.response.send_message(
+                        f"⚠️ Stock insuffisant pour **{item['label']}**. Veuillez approvisionner.",
+                        ephemeral=True
+                    )
+                    return
+        detail_text = "\n".join(f"• {d['qte']}x {d['label']} — {d['prix']} $" for d in self.session.details) or "Aucun soin sélectionné"
+        record_id = await save_dossier_intervention(
+            patient_prenom=self.session.patient_prenom,
+            patient_nom=self.session.patient_nom,
+            blessure="Facturation soins",
+            soins=detail_text,
+            transport="",
+            facture=str(self.session.total),
+            statut_facture="En attente",
+            created_by=interaction.user.id,
+            created_by_name=interaction.user.display_name,
+        )
+        embed = discord.Embed(title="🧾 Facturation finale", color=discord.Color.gold())
+        embed.add_field(name="Patient", value=f"{self.session.patient_prenom} {self.session.patient_nom}", inline=False)
+        embed.add_field(name="Soins effectués", value=detail_text, inline=False)
+        embed.add_field(name="Total", value=f"**{self.session.total} $**", inline=False)
+        embed.add_field(name="Statut de paiement", value="⏳ **En attente**", inline=False)
+        embed.set_footer(text=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}")
+        final_view = FacturationFinalView(
+            patient_prenom=self.session.patient_prenom,
+            patient_nom=self.session.patient_nom,
+            details=detail_text.split("\n"),
+            total=self.session.total,
+            record_id=record_id,
+            footer=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}",
+        )
+        await interaction.response.edit_message(embed=embed, view=final_view)
+
+@bot.tree.command(name="facturation", description="Noter les soins effectués et calculer le prix total")
+@app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
+async def facturation(interaction: discord.Interaction, prenom: str, nom: str):
+    session = FacturationSession()
+    session.patient_prenom = prenom
+    session.patient_nom = nom
+    dossier = await get_dossier_personnel(prenom, nom)
+    if dossier:
+        session.patient_prenom = dossier["prenom"]
+        session.patient_nom = dossier["nom"]
+    embed = build_facturation_embed(session, note="Choisis une catégorie de soins pour commencer.")
+    await interaction.response.send_message(embed=embed, view=FacturationCategoryView(session))
+
+# ---------- ORDONNANCE ----------
 MEDICAMENTS_CATEGORIES = {
     "sans_addiction": {
         "label": "💊 Médicaments sans addiction",
@@ -1265,6 +1575,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "après",
                 "frequence": "3x/jour (matin, midi, soir)",
                 "addictif": False,
+                "stock_key": "medicament_paracetamol"
             },
             "ibuprofene": {
                 "nom": "Ibuprofène — Anti-inflammatoire, antipyrétique, analgésique",
@@ -1277,6 +1588,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "après",
                 "frequence": "3x/jour",
                 "addictif": False,
+                "stock_key": "medicament_ibuprofene"
             },
             "aspirine": {
                 "nom": "Aspirine — Antalgique, anti-inflammatoire, antipyrétique, antiagrégant plaquettaire",
@@ -1289,6 +1601,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "après",
                 "frequence": "3x/jour",
                 "addictif": False,
+                "stock_key": "medicament_aspirine"
             },
             "cyclizine": {
                 "nom": "Cyclizine — Antiémétique, sédatif",
@@ -1298,6 +1611,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "indifférent",
                 "frequence": "2x/jour",
                 "addictif": False,
+                "stock_key": "medicament_cyclizine"
             },
             "lithium": {
                 "nom": "Traitement au lithium — Thymorégulateur",
@@ -1310,6 +1624,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "après",
                 "frequence": "2x/jour",
                 "addictif": False,
+                "stock_key": "medicament_lithium"
             },
             "beta_bloquants": {
                 "nom": "Bêta-bloquants — Régulateur, anti-hypertenseur",
@@ -1322,6 +1637,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "avant",
                 "frequence": "1x/jour (matin)",
                 "addictif": False,
+                "stock_key": "medicament_beta_bloquants"
             },
             "captopril": {
                 "nom": "Captopril (IEC) — Anti-hypertenseur",
@@ -1333,6 +1649,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "avant",
                 "frequence": "2x/jour",
                 "addictif": False,
+                "stock_key": "medicament_captopril"
             },
             "helicidine": {
                 "nom": "Hélicidine — Expectorant",
@@ -1342,6 +1659,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "indifférent",
                 "frequence": "3x/jour",
                 "addictif": False,
+                "stock_key": "medicament_helicidine"
             },
         },
     },
@@ -1359,6 +1677,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "après",
                 "frequence": "3x/jour",
                 "addictif": True,
+                "stock_key": "medicament_tramadol"
             },
             "morphine": {
                 "nom": "Morphine — Analgésique, sédatif",
@@ -1372,6 +1691,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "indifférent",
                 "frequence": "Selon prescription médicale stricte",
                 "addictif": True,
+                "stock_key": "medicament_morphine"
             },
             "loprazolam": {
                 "nom": "Loprazolam — Anxiolytique, anticonvulsivant, sédatif",
@@ -1384,6 +1704,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "avant",
                 "frequence": "1x/jour (soir)",
                 "addictif": True,
+                "stock_key": "medicament_loprazolam"
             },
             "epinephrine": {
                 "nom": "Épinéphrine — Vasodilatateur, broncho-dilatateur",
@@ -1393,6 +1714,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "indifférent",
                 "frequence": "1 dose maximum/jour",
                 "addictif": True,
+                "stock_key": "medicament_epinephrine"
             },
             "cocillana": {
                 "nom": "Cocillana — Antitussif",
@@ -1405,6 +1727,7 @@ MEDICAMENTS_CATEGORIES = {
                 "repas": "indifférent",
                 "frequence": "3x/jour",
                 "addictif": True,
+                "stock_key": "medicament_cocillana"
             },
         },
     },
@@ -1536,6 +1859,18 @@ class OrdonnanceSummaryView(SafeView):
         await interaction.response.edit_message(embed=embed, view=view)
     @discord.ui.button(label="✅ Terminer et générer l'ordonnance", style=discord.ButtonStyle.success)
     async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Décrémenter les stocks pour chaque médicament
+        for ligne in self.session.lignes:
+            med = ligne["med"]
+            stock_key = med.get("stock_key")
+            if stock_key:
+                success = await decrement_stock(stock_key, 1)
+                if not success:
+                    await interaction.response.send_message(
+                        f"⚠️ Stock insuffisant pour **{med['nom']}**. Veuillez approvisionner.",
+                        ephemeral=True
+                    )
+                    return
         alerte = ""
         if any(l["med"].get("addictif") for l in self.session.lignes):
             alerte = "\n⚠️ **Cette ordonnance contient un médicament à risque d'addiction — accord d'un supérieur requis avant délivrance.**"
@@ -1581,127 +1916,8 @@ async def ordonnance(interaction: discord.Interaction, prenom: str, nom: str):
     embed = build_ordonnance_embed(session, note="Choisis une catégorie de médicaments pour commencer.")
     await interaction.response.send_message(embed=embed, view=OrdonnanceCategoryView(session))
 
-class FacturationCategorySelect(discord.ui.Select):
-    def __init__(self, session: FacturationSession):
-        self.session = session
-        options = [discord.SelectOption(label=cat["label"][:100], value=key) for key, cat in FACTURATION_CATEGORIES.items()]
-        super().__init__(placeholder="Choisis une catégorie de soins...", options=options)
-    async def callback(self, interaction: discord.Interaction):
-        cat_key = self.values[0]
-        note = f"Catégorie : {FACTURATION_CATEGORIES[cat_key]['label']}"
-        embed = build_facturation_embed(self.session, note=note)
-        view = FacturationItemView(self.session, cat_key)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-class FacturationCategoryView(SafeView):
-    def __init__(self, session: FacturationSession):
-        super().__init__(timeout=180)
-        self.add_item(FacturationCategorySelect(session))
-
-class FacturationItemSelect(discord.ui.Select):
-    def __init__(self, session: FacturationSession, cat_key: str):
-        self.session = session
-        self.cat_key = cat_key
-        items = FACTURATION_CATEGORIES[cat_key]["items"]
-        options = [discord.SelectOption(label=f"{v['label']} — {v['prix']} $", value=k) for k, v in items.items()]
-        super().__init__(placeholder="Sélectionne un soin...", min_values=1, max_values=1, options=options)
-    async def callback(self, interaction: discord.Interaction):
-        key = self.values[0]
-        item = FACTURATION_CATEGORIES[self.cat_key]["items"][key]
-        await interaction.response.send_modal(QuantityModal(self.session, key, item, self.cat_key))
-
-class QuantityModal(discord.ui.Modal, title="Quantité du soin"):
-    quantite = discord.ui.TextInput(label="Combien de fois ?", placeholder="Ex: 2", default="1")
-    def __init__(self, session: FacturationSession, item_key: str, item_data: dict, cat_key: str):
-        super().__init__()
-        self.session = session
-        self.item_key = item_key
-        self.item_data = item_data
-        self.cat_key = cat_key
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            qte = int(self.quantite.value)
-            if qte < 1: qte = 1
-            if qte > 99: qte = 99
-        except ValueError:
-            qte = 1
-        cout_total = self.item_data["prix"] * qte
-        self.session.total += cout_total
-        self.session.details.append(f"{qte}x {self.item_data['label']} — {cout_total} $")
-        embed = build_facturation_embed(self.session)
-        view = FacturationSummaryView(self.session)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-class BackToCategoryButton(discord.ui.Button):
-    def __init__(self, session: FacturationSession):
-        super().__init__(label="↩️ Changer de catégorie", style=discord.ButtonStyle.secondary, row=1)
-        self.session = session
-    async def callback(self, interaction: discord.Interaction):
-        embed = build_facturation_embed(self.session)
-        view = FacturationCategoryView(self.session)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-class FacturationItemView(SafeView):
-    def __init__(self, session: FacturationSession, cat_key: str):
-        super().__init__(timeout=180)
-        self.add_item(FacturationItemSelect(session, cat_key))
-        self.add_item(BackToCategoryButton(session))
-
-class FacturationSummaryView(SafeView):
-    def __init__(self, session: FacturationSession):
-        super().__init__(timeout=180)
-        self.session = session
-    @discord.ui.button(label="➕ Ajouter un autre soin", style=discord.ButtonStyle.secondary)
-    async def add_more(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = build_facturation_embed(self.session)
-        view = FacturationCategoryView(self.session)
-        await interaction.response.edit_message(embed=embed, view=view)
-    @discord.ui.button(label="✅ Terminer et facturer", style=discord.ButtonStyle.success)
-    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        detail_text = "\n".join(f"• {d}" for d in self.session.details) or "Aucun soin sélectionné"
-        record_id = await save_dossier_intervention(
-            patient_prenom=self.session.patient_prenom,
-            patient_nom=self.session.patient_nom,
-            blessure="Facturation soins",
-            soins=detail_text,
-            transport="",
-            facture=str(self.session.total),
-            statut_facture="En attente",
-            created_by=interaction.user.id,
-            created_by_name=interaction.user.display_name,
-        )
-        embed = discord.Embed(title="🧾 Facturation finale", color=discord.Color.gold())
-        embed.add_field(name="Patient", value=f"{self.session.patient_prenom} {self.session.patient_nom}", inline=False)
-        embed.add_field(name="Soins effectués", value=detail_text, inline=False)
-        embed.add_field(name="Total", value=f"**{self.session.total} $**", inline=False)
-        embed.add_field(name="Statut de paiement", value="⏳ **En attente**", inline=False)
-        embed.set_footer(text=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}")
-        final_view = FacturationFinalView(
-            patient_prenom=self.session.patient_prenom,
-            patient_nom=self.session.patient_nom,
-            details=self.session.details,
-            total=self.session.total,
-            record_id=record_id,
-            footer=f"Facturé par {interaction.user.display_name} • Dossier n°{record_id}",
-        )
-        await interaction.response.edit_message(embed=embed, view=final_view)
-
-@bot.tree.command(name="facturation", description="Noter les soins effectués et calculer le prix total")
-@app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
-async def facturation(interaction: discord.Interaction, prenom: str, nom: str):
-    session = FacturationSession()
-    session.patient_prenom = prenom
-    session.patient_nom = nom
-    dossier = await get_dossier_personnel(prenom, nom)
-    if dossier:
-        session.patient_prenom = dossier["prenom"]
-        session.patient_nom = dossier["nom"]
-    embed = build_facturation_embed(session, note="Choisis une catégorie de soins pour commencer.")
-    await interaction.response.send_message(embed=embed, view=FacturationCategoryView(session))
-
-# ---------- TEST PSYCHOTECHNIQUE PPA ----------
-PPA_SEUIL_REUSSITE = 7  # sur 10
-
+# ---------- TEST PPA ----------
+PPA_SEUIL_REUSSITE = 7
 PPA_QUESTIONS = [
     {
         "question": "Un véhicule roule à 90 km/h. Le conducteur voit un obstacle à 60 mètres. Quelle est la meilleure réaction ?",
@@ -1873,9 +2089,96 @@ async def ppa_resultat(interaction: discord.Interaction, prenom: str, nom: str):
     embed.set_footer(text=f"Passé le {certificat['created_at'][:10]} • Évalué par {certificat['created_by_name']}")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# ---------- COMMANDES ----------
+# ---------- AUTOPSIE ----------
+class AutopsieModal4(discord.ui.Modal, title="Autopsie (4/4) - Conclusions"):
+    traces_substances = discord.ui.TextInput(label="Traces de substances", placeholder="Alcool, drogues, médicaments...", style=discord.TextStyle.paragraph, required=False)
+    conclusions = discord.ui.TextInput(label="Conclusions du légiste", placeholder="Conclusion médico-légale", style=discord.TextStyle.paragraph)
+    medecin_legiste = discord.ui.TextInput(label="Médecin légiste", placeholder="Nom complet")
 
-# GESTION DES PATIENTS
+    def __init__(self, data: dict):
+        super().__init__()
+        self.data = data
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.data.update({
+            "traces_substances": self.traces_substances.value,
+            "conclusions": self.conclusions.value,
+            "medecin_legiste": self.medecin_legiste.value,
+            "date_autopsie": datetime.now().strftime("%d/%m/%Y"),
+        })
+        await _finaliser_autopsie(interaction, self.data)
+
+class AutopsieModal3(discord.ui.Modal, title="Autopsie (3/4) - Cause & Arme"):
+    cause_probable = discord.ui.TextInput(label="Cause probable du décès", placeholder="Arrêt cardiaque, hémorragie, asphyxie...", style=discord.TextStyle.paragraph)
+    type_arme = discord.ui.TextInput(label="Type d'arme / impact", placeholder="Arme à feu, arme blanche, chute, etc.", style=discord.TextStyle.paragraph, required=False)
+
+    def __init__(self, data: dict):
+        super().__init__()
+        self.data = data
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.data.update({
+            "cause_probable": self.cause_probable.value,
+            "type_arme": self.type_arme.value,
+        })
+        next_view = NextStepView(AutopsieModal4(self.data), label="Étape 4/4 : Conclusions ➡️")
+        await interaction.response.send_message("✅ **Étape 3/4 validée.** Cliquez ci-dessous pour terminer.", view=next_view, ephemeral=True)
+
+class AutopsieModal2(discord.ui.Modal, title="Autopsie (2/4) - Détails du décès"):
+    date_deces = discord.ui.TextInput(label="Date du décès", placeholder="JJ/MM/AAAA")
+    heure_estimee = discord.ui.TextInput(label="Heure estimée du décès", placeholder="HH:MM", required=False)
+
+    def __init__(self, data: dict):
+        super().__init__()
+        self.data = data
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.data.update({
+            "date_deces": self.date_deces.value,
+            "heure_estimee": self.heure_estimee.value,
+        })
+        next_view = NextStepView(AutopsieModal3(self.data), label="Étape 3/4 : Cause & Arme ➡️")
+        await interaction.response.send_message("✅ **Étape 2/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
+
+class AutopsieModal(discord.ui.Modal, title="Autopsie (1/4) - Patient"):
+    patient_prenom = discord.ui.TextInput(label="Prénom du patient", placeholder="Prénom")
+    patient_nom = discord.ui.TextInput(label="Nom du patient", placeholder="Nom")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        data = {
+            "patient_prenom": self.patient_prenom.value,
+            "patient_nom": self.patient_nom.value,
+        }
+        next_view = NextStepView(AutopsieModal2(data), label="Étape 2/4 : Détails du décès ➡️")
+        await interaction.response.send_message("✅ **Étape 1/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
+
+async def _finaliser_autopsie(interaction: discord.Interaction, data: dict):
+    record_id = await save_autopsie(data, interaction.user.id)
+    embed = discord.Embed(
+        title="⚖️ Rapport d'Autopsie",
+        description=f"**Patient :** {data['patient_prenom']} {data['patient_nom']}",
+        color=discord.Color.dark_gold()
+    )
+    embed.add_field(name="Date du décès", value=data["date_deces"], inline=True)
+    embed.add_field(name="Heure estimée", value=data.get("heure_estimee", "N/A"), inline=True)
+    embed.add_field(name="Cause probable", value=data["cause_probable"], inline=False)
+    embed.add_field(name="Type d'arme / impact", value=data.get("type_arme", "N/A"), inline=False)
+    embed.add_field(name="Traces de substances", value=data.get("traces_substances", "Aucune"), inline=False)
+    embed.add_field(name="Conclusions", value=data["conclusions"], inline=False)
+    embed.add_field(name="Médecin légiste", value=data["medecin_legiste"], inline=True)
+    embed.add_field(name="Date autopsie", value=data["date_autopsie"], inline=True)
+    embed.set_footer(text=f"Rapport n°{record_id} • Établi par {interaction.user.display_name}")
+
+    view = AutopsieView(record_id, data, footer=interaction.user.display_name)
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
+    except discord.HTTPException:
+        await interaction.followup.send(embed=embed, view=view)
+
+# ---------- COMMANDES ----------
 @bot.tree.command(name="patient_creer", description="Créer un nouveau patient (prénom et nom)")
 @app_commands.describe(prenom="Prénom du patient", nom="Nom de famille")
 async def patient_creer(interaction: discord.Interaction, prenom: str, nom: str):
@@ -2012,7 +2315,6 @@ async def patient_liste(interaction: discord.Interaction, limite: Optional[int] 
         embed.add_field(name=f"**{lettre}** ({len(patients_par_lettre[lettre])})", value=noms, inline=True)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# DOSSIER
 @bot.tree.command(name="nouveau_dossier", description="Créer un dossier médical complet")
 async def dossier_medical_creer(interaction: discord.Interaction):
     await interaction.response.send_modal(DossierMedicalModal())
@@ -2061,7 +2363,7 @@ async def dossier_afficher(interaction: discord.Interaction, identifiant: str):
     if dossier.get("created_at") and dossier.get("updated_at"):
         embed.set_footer(text=f"Dossier créé le {dossier['created_at'][:10]} • Mis à jour le {dossier['updated_at'][:10]}")
 
-    await interaction.response.send_message(embed=embed, ephemeral=False)  # Permanent
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
 @dossier_voir.autocomplete("identifiant")
 @dossier_afficher.autocomplete("identifiant")
@@ -2096,6 +2398,84 @@ async def dossier_supprimer_intervention(interaction: discord.Interaction, id: i
     else:
         await interaction.response.send_message(f"Aucune intervention n°{id} trouvée.", ephemeral=True)
 
+# ---------- AUTOPSIE COMMANDES ----------
+@bot.tree.command(name="autopsie_creer", description="Créer un rapport d'autopsie")
+async def autopsie_creer(interaction: discord.Interaction):
+    await interaction.response.send_modal(AutopsieModal())
+
+@bot.tree.command(name="autopsie_voir", description="Consulter un rapport d'autopsie par patient")
+@app_commands.describe(identifiant="Prénom et nom ou recherche")
+async def autopsie_voir(interaction: discord.Interaction, identifiant: str):
+    autopsies = await search_autopsies(identifiant, 1)
+    if not autopsies:
+        await interaction.response.send_message(f"Aucune autopsie trouvée pour '{identifiant}'.", ephemeral=True)
+        return
+    data = autopsies[0]
+    embed = discord.Embed(
+        title="⚖️ Rapport d'Autopsie",
+        description=f"**Patient :** {data['patient_prenom']} {data['patient_nom']}",
+        color=discord.Color.dark_gold()
+    )
+    embed.add_field(name="Date du décès", value=data["date_deces"], inline=True)
+    embed.add_field(name="Heure estimée", value=data.get("heure_estimee", "N/A"), inline=True)
+    embed.add_field(name="Cause probable", value=data["cause_probable"], inline=False)
+    embed.add_field(name="Type d'arme / impact", value=data.get("type_arme", "N/A"), inline=False)
+    embed.add_field(name="Traces de substances", value=data.get("traces_substances", "Aucune"), inline=False)
+    embed.add_field(name="Conclusions", value=data["conclusions"], inline=False)
+    embed.add_field(name="Médecin légiste", value=data["medecin_legiste"], inline=True)
+    embed.set_footer(text=f"Rapport n°{data['id']} • Date autopsie : {data['date_autopsie']}")
+    view = AutopsieView(data['id'], data, footer=data.get('medecin_legiste', 'Légiste'))
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+# ---------- STOCKS COMMANDES ----------
+@bot.tree.command(name="inventaire", description="Afficher l'inventaire des stocks")
+async def inventaire(interaction: discord.Interaction):
+    stocks = await get_all_stocks()
+    if not stocks:
+        await interaction.response.send_message("Aucun stock enregistré.", ephemeral=True)
+        return
+    embed = discord.Embed(title="📦 Inventaire des stocks", color=discord.Color.blue())
+    for s in stocks:
+        etat = "🟢" if s["quantite"] > s["seuil_alerte"] else "🔴"
+        embed.add_field(
+            name=f"{etat} {s['nom']}",
+            value=f"Quantité : **{s['quantite']}**\nSeuil d'alerte : {s['seuil_alerte']}",
+            inline=True
+        )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="inventaire_ajouter", description="Ajouter du stock (simuler une livraison)")
+@app_commands.describe(nom="Nom du stock (ex: poche_sang)", quantite="Quantité à ajouter")
+async def inventaire_ajouter(interaction: discord.Interaction, nom: str, quantite: int):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Vous devez être administrateur pour utiliser cette commande.", ephemeral=True)
+        return
+    if quantite <= 0:
+        await interaction.response.send_message("La quantité doit être positive.", ephemeral=True)
+        return
+    stock = await get_stock(nom)
+    if stock is None:
+        await interaction.response.send_message(f"❌ Le stock '{nom}' n'existe pas.", ephemeral=True)
+        return
+    await increment_stock(nom, quantite)
+    await interaction.response.send_message(f"✅ Ajout de **{quantite}** unités de **{nom}**. Nouveau stock : {stock + quantite}.", ephemeral=True)
+
+@bot.tree.command(name="inventaire_seuil", description="Définir le seuil d'alerte pour un stock")
+@app_commands.describe(nom="Nom du stock", seuil="Nouveau seuil")
+async def inventaire_seuil(interaction: discord.Interaction, nom: str, seuil: int):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Vous devez être administrateur.", ephemeral=True)
+        return
+    if seuil < 0:
+        await interaction.response.send_message("Le seuil doit être positif.", ephemeral=True)
+        return
+    stock = await get_stock(nom)
+    if stock is None:
+        await interaction.response.send_message(f"❌ Le stock '{nom}' n'existe pas.", ephemeral=True)
+        return
+    await set_stock_threshold(nom, seuil)
+    await interaction.response.send_message(f"✅ Seuil d'alerte pour **{nom}** mis à **{seuil}**.", ephemeral=True)
+
 # ---------- ANALYSE GROUPE SANGUIN ----------
 GROUPE_SANGUIN_RESULTATS = [
     {"groupe": "A+", "rh": "Positif", "frequence": "35%", "description": "Groupe sanguin le plus répandu en Europe"},
@@ -2128,8 +2508,6 @@ COMPATIBILITE_GROUPE = {
     nom="Nom de famille du patient"
 )
 async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, nom: str):
-    """Effectue une analyse de groupe sanguin et affiche le dossier complet mis à jour."""
-
     dossier = await get_dossier_personnel(prenom, nom)
     if not dossier:
         resultats = await search_dossiers_personnel(f"{prenom} {nom}", 3)
@@ -2195,38 +2573,29 @@ async def analyse_groupe_sanguin(interaction: discord.Interaction, prenom: str, 
     donneur_pour = ", ".join(compat.get("donneur_pour", []))
     receveur_de = ", ".join(compat.get("receveur_de", []))
 
-    # La fusion automatique de save_dossier_personnel conserve tout le reste du dossier :
-    # seul le groupe sanguin change, rien n'est écrasé.
+    # Mise à jour du dossier avec le groupe sanguin (et conservation des allergies existantes)
     await save_dossier_personnel(
         prenom=prenom,
         nom=nom,
         created_by=interaction.user.id,
         groupe_sanguin=groupe,
         contact_urgence=dossier.get("contact_urgence") or f"Analyse sanguine du {datetime.now().strftime('%d/%m/%Y')}",
+        # On conserve les allergies existantes (ne pas les écraser)
+        allergies=dossier.get("allergies"),
     )
 
     dossier_updated = await get_dossier_personnel(prenom, nom)
 
-    embed_final = build_dossier_complet_embed(dossier_updated, titre="🩺 Dossier Médical")
-    embed_final.color = discord.Color.green()
-
-    embed_final.add_field(
-        name="🩸 Compatibilités sanguines",
-        value=f"**Peut donner à :** {donneur_pour}\n**Peut recevoir de :** {receveur_de}",
-        inline=False
+    # Embed final : on affiche le groupe, les allergies et les compatibilités
+    embed_final = discord.Embed(
+        title="🩸 Résultat de l'Analyse Sanguine",
+        description=f"**Patient :** {prenom} {nom}",
+        color=discord.Color.green()
     )
-
-    interventions = await get_interventions_for_patient(prenom, nom, 5)
-    if interventions:
-        historique = "\n".join(
-            f"**#{i['id']}** — {i['blessure']} ({i['created_at'][:10]})"
-            for i in interventions
-        )
-        embed_final.add_field(name="📋 Historique des interventions (5 dernières)", value=historique, inline=False)
-
-    embed_final.set_footer(
-        text=f"✅ Analyse effectuée le {datetime.now().strftime('%d/%m/%Y à %H:%M')} • Dossier mis à jour"
-    )
+    embed_final.add_field(name="Groupe sanguin", value=f"**{groupe}**", inline=True)
+    embed_final.add_field(name="Allergies connues", value=dossier_updated.get("allergies") or "Aucune", inline=True)
+    embed_final.add_field(name="Compatibilités", value=f"**Peut donner à :** {donneur_pour}\n**Peut recevoir de :** {receveur_de}", inline=False)
+    embed_final.set_footer(text=f"Analyse effectuée le {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
 
     await interaction.edit_original_response(embed=embed_final, view=None)
 
@@ -2410,17 +2779,11 @@ async def triage(interaction: discord.Interaction):
 
 # ---------- DÉMARRAGE ----------
 async def main():
-    """Fonction principale pour initialiser le bot et la base de données."""
-    # 1. On initialise la base de données SQLite (fichier local) AVANT de démarrer le bot
     await db.init_pool()
     logger.info("✅ Base de données SQLite locale connectée avec succès (%s).", DB_PATH)
-
-    # 2. On initialise le bot proprement avec un gestionnaire de contexte
     async with bot:
-        # 3. On lance le bot
         await bot.start(TOKEN)
 
-# Lancement sécurisé du bot
 if __name__ == "__main__":
     if not TOKEN:
         print("❌ ERREUR : DISCORD_TOKEN non défini !")
