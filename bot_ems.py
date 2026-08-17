@@ -821,6 +821,7 @@ def build_dossier_complet_embed(dossier: dict, titre: str = "🩺 Dossier Médic
         embed.set_footer(text=f"Dossier mis à jour le {dossier['updated_at'][:10]}")
     return embed
 
+# ---- FONCTIONS FINALES CORRIGÉES ----
 async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dict):
     await save_dossier_personnel(
         prenom=data["prenom"],
@@ -858,8 +859,13 @@ async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dic
         footer=interaction.user.display_name,
     )
 
-    # Envoi via followup car l'interaction est déjà répondue (modal)
-    await interaction.followup.send(embed=embed, view=view)
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
+    except discord.HTTPException:
+        await interaction.followup.send(embed=embed, view=view)
 
 class DossierMedicalModal4(discord.ui.Modal, title="Dossier Médical (4/4) - Conclusion"):
     audition = discord.ui.TextInput(label="Audition", placeholder="Normale / Diminuée", required=False)
@@ -1219,7 +1225,13 @@ async def _finaliser_rapport_intervention(interaction: discord.Interaction, data
         record_id=record_id,
     )
 
-    await interaction.followup.send(embed=embed, view=view)
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
+    except discord.HTTPException:
+        await interaction.followup.send(embed=embed, view=view)
 
 class RapportInterventionModal4(discord.ui.Modal, title="Rapport EMS (4/4) - Conclusion"):
     conclusion = discord.ui.TextInput(label="Conclusion de l'intervention", placeholder="Patient stabilisé / transporté / décédé malgré les soins", style=discord.TextStyle.paragraph)
@@ -2161,7 +2173,14 @@ async def _finaliser_autopsie(interaction: discord.Interaction, data: dict):
     embed.set_footer(text=f"Rapport n°{record_id} • Établi par {interaction.user.display_name}")
 
     view = AutopsieView(record_id, data, footer=interaction.user.display_name)
-    await interaction.followup.send(embed=embed, view=view)
+
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
+    except discord.HTTPException:
+        await interaction.followup.send(embed=embed, view=view)
 
 # ---------- COMMANDES ----------
 @bot.tree.command(name="patient_creer", description="Créer un nouveau patient (prénom et nom)")
