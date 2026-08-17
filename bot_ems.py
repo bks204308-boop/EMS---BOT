@@ -789,36 +789,60 @@ class AutopsieView(SafeView):
 
 # ---------- FORMULAIRES DOSSIER MÉDICAL ----------
 def build_dossier_complet_embed(dossier: dict, titre: str = "🩺 Dossier Médical") -> discord.Embed:
+    """Construit un embed avec un maximum de 8 champs (respecte la limite de 25)."""
     embed = discord.Embed(title=f"**__{titre} — {dossier['prenom']} {dossier['nom']}__**", color=discord.Color.blue())
-    embed.add_field(name="**__Identité du patient__**", value="\u200b", inline=False)
-    embed.add_field(name="**Prénom**", value=dossier["prenom"], inline=True)
-    embed.add_field(name="**Nom**", value=dossier["nom"], inline=True)
-    embed.add_field(name="**Date de naissance**", value=dossier.get("date_naissance") or "Non renseignée", inline=True)
-    embed.add_field(name="**Sexe**", value=dossier.get("sexe") or "N/A", inline=True)
-    embed.add_field(name="**Dernière visite**", value=dossier.get("date_visite") or "N/A", inline=True)
-    embed.add_field(name="**Médecin / EMS**", value=dossier.get("medecin_ems") or "N/A", inline=True)
-    embed.add_field(name="\n```Antécédents médicaux```", value="\u200b", inline=False)
-    embed.add_field(name="Allergies", value=dossier.get("allergies") or "Aucune", inline=True)
-    embed.add_field(name="Maladies chroniques", value=dossier.get("maladies_chroniques") or "Aucune", inline=True)
-    embed.add_field(name="Traitement(s) actuel(s)", value=dossier.get("traitements") or "Non", inline=True)
-    embed.add_field(name="Antécédents chirurgicaux", value=dossier.get("antecedents_chirurgicaux") or "Non", inline=True)
-    embed.add_field(name="\n```Dernier examen clinique```", value="\u200b", inline=False)
-    embed.add_field(name="Taille", value=f"{dossier['taille']} cm" if dossier.get("taille") else "N/A", inline=True)
-    embed.add_field(name="Poids", value=f"{dossier['poids']} kg" if dossier.get("poids") else "N/A", inline=True)
-    embed.add_field(name="Groupe sanguin", value=dossier.get("groupe_sanguin") or "❌ Non déterminé (faire une analyse)", inline=True)
-    embed.add_field(name="Pouls", value=dossier.get("pouls") or "N/A", inline=True)
-    embed.add_field(name="Respiration", value=dossier.get("respiration") or "N/A", inline=True)
-    embed.add_field(name="Vision", value=dossier.get("vision") or "N/A", inline=True)
-    embed.add_field(name="Audition", value=dossier.get("audition") or "N/A", inline=True)
-    embed.add_field(name="\n```Observations du médecin```", value=dossier.get("observations") or "Aucune observation", inline=False)
-    embed.add_field(name="\n```Conclusion```", value="\u200b", inline=False)
-    embed.add_field(name="Aptitude", value=dossier.get("aptitude") or "Non spécifié", inline=True)
-    embed.add_field(name="Recommandations", value=dossier.get("recommandations") or "Aucun suivi nécessaire", inline=True)
-    embed.add_field(name="\n**Signature & cachet du médecin**", value=dossier.get("signature") or "Non signé", inline=False)
+
+    # Identité
+    identite = (
+        f"**Prénom :** {dossier['prenom']}\n"
+        f"**Nom :** {dossier['nom']}\n"
+        f"**Date de naissance :** {dossier.get('date_naissance') or 'Non renseignée'}\n"
+        f"**Sexe :** {dossier.get('sexe') or 'N/A'}\n"
+        f"**Dernière visite :** {dossier.get('date_visite') or 'N/A'}\n"
+        f"**Médecin / EMS :** {dossier.get('medecin_ems') or 'N/A'}"
+    )
+    embed.add_field(name="**__Identité du patient__**", value=identite, inline=False)
+
+    # Antécédents
+    antecedents = (
+        f"**Allergies :** {dossier.get('allergies') or 'Aucune'}\n"
+        f"**Maladies chroniques :** {dossier.get('maladies_chroniques') or 'Aucune'}\n"
+        f"**Traitement(s) actuel(s) :** {dossier.get('traitements') or 'Non'}\n"
+        f"**Antécédents chirurgicaux :** {dossier.get('antecedents_chirurgicaux') or 'Non'}"
+    )
+    embed.add_field(name="**__Antécédents médicaux__**", value=antecedents, inline=False)
+
+    # Examen clinique
+    clinique = (
+        f"**Taille :** {dossier.get('taille') or 'N/A'} cm\n"
+        f"**Poids :** {dossier.get('poids') or 'N/A'} kg\n"
+        f"**Groupe sanguin :** {dossier.get('groupe_sanguin') or '❌ Non déterminé (faire une analyse)'}\n"
+        f"**Pouls :** {dossier.get('pouls') or 'N/A'}\n"
+        f"**Respiration :** {dossier.get('respiration') or 'N/A'}\n"
+        f"**Vision :** {dossier.get('vision') or 'N/A'}\n"
+        f"**Audition :** {dossier.get('audition') or 'N/A'}"
+    )
+    embed.add_field(name="**__Dernier examen clinique__**", value=clinique, inline=False)
+
+    # Observations
+    embed.add_field(name="**__Observations du médecin__**", value=dossier.get('observations') or "Aucune observation", inline=False)
+
+    # Conclusion
+    conclusion = (
+        f"**Aptitude :** {dossier.get('aptitude') or 'Non spécifié'}\n"
+        f"**Recommandations :** {dossier.get('recommandations') or 'Aucun suivi nécessaire'}"
+    )
+    embed.add_field(name="**__Conclusion__**", value=conclusion, inline=False)
+
+    # Signature
+    embed.add_field(name="**__Signature & cachet du médecin__**", value=dossier.get('signature') or 'Non signé', inline=False)
+
     if dossier.get("contact_urgence"):
-        embed.add_field(name="\n**Contact d'urgence**", value=dossier["contact_urgence"], inline=False)
+        embed.add_field(name="**__Contact d'urgence__**", value=dossier["contact_urgence"], inline=False)
+
     if dossier.get("updated_at"):
         embed.set_footer(text=f"Dossier mis à jour le {dossier['updated_at'][:10]}")
+
     return embed
 
 # ---- FONCTIONS FINALES CORRIGÉES ----
