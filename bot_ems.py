@@ -2820,3 +2820,16 @@ if __name__ == "__main__":
             asyncio.run(main())
         except KeyboardInterrupt:
             print("\n🛑 Bot arrêté manuellement.")
+            class SafeModal(discord.ui.Modal):
+                
+    async def on_error(self, interaction: discord.Interaction, error: Exception):
+        logger.error("Erreur dans le modal %s : %s", self.title, error)
+        traceback.print_exception(type(error), error, error.__traceback__)
+        message = "Une erreur est survenue en traitant ce formulaire."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
