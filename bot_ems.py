@@ -701,6 +701,19 @@ class SafeView(discord.ui.View):
         except discord.HTTPException:
             pass
 
+class SafeModal(discord.ui.Modal):
+    async def on_error(self, interaction: discord.Interaction, error: Exception):
+        logger.error("Erreur dans le modal %s : %s", getattr(self, "title", "?"), error)
+        traceback.print_exception(type(error), error, error.__traceback__)
+        message = "Une erreur est survenue en traitant ce formulaire."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
+
 class NextStepView(SafeView):
     def __init__(self, next_modal: discord.ui.Modal, label: str):
         super().__init__(timeout=180)
@@ -891,7 +904,7 @@ async def _finaliser_dossier_medical(interaction: discord.Interaction, data: dic
     except discord.HTTPException:
         await interaction.followup.send(embed=embed, view=view)
 
-class DossierMedicalModal4(discord.ui.Modal, title="Dossier Médical (4/4) - Conclusion"):
+class DossierMedicalModal4(SafeModal, title="Dossier Médical (4/4) - Conclusion"):
     audition = discord.ui.TextInput(label="Audition", placeholder="Normale / Diminuée", required=False)
     observations = discord.ui.TextInput(label="Observations du médecin", style=discord.TextStyle.paragraph, placeholder="Ex: Patient en bonne santé générale, apte à la conduite.", required=False)
     aptitude = discord.ui.TextInput(label="Conclusion - Aptitude", placeholder="Patient apte / inapte selon la visite médicale.", required=False)
@@ -912,7 +925,7 @@ class DossierMedicalModal4(discord.ui.Modal, title="Dossier Médical (4/4) - Con
         })
         await _finaliser_dossier_medical(interaction, self.data)
 
-class DossierMedicalModal3(discord.ui.Modal, title="Dossier Médical (3/4) - Examen clinique"):
+class DossierMedicalModal3(SafeModal, title="Dossier Médical (3/4) - Examen clinique"):
     poids = discord.ui.TextInput(label="Poids", placeholder="kg", required=False)
     pouls = discord.ui.TextInput(label="Pouls", placeholder="Normal / Rapide / Lent", required=False)
     respiration = discord.ui.TextInput(label="Respiration", placeholder="Normale / Difficile", required=False)
@@ -934,7 +947,7 @@ class DossierMedicalModal3(discord.ui.Modal, title="Dossier Médical (3/4) - Exa
         next_view = NextStepView(DossierMedicalModal4(self.data), label="Étape 4/4 : Conclusion ➡️")
         await interaction.response.send_message("✅ **Étape 3/4 validée.** Cliquez ci-dessous pour l'étape finale.", view=next_view, ephemeral=True)
 
-class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Antécédents"):
+class DossierMedicalModal2(SafeModal, title="Dossier Médical (2/4) - Antécédents"):
     allergies = discord.ui.TextInput(label="Allergies", placeholder="Aucune / Oui, préciser", style=discord.TextStyle.paragraph, required=False)
     maladies_chroniques = discord.ui.TextInput(label="Maladies chroniques", placeholder="Hypertension, diabète, asthme… / Aucune", style=discord.TextStyle.paragraph, required=False)
     traitements = discord.ui.TextInput(label="Traitement(s) actuel(s)", placeholder="Oui / Non", required=False)
@@ -956,7 +969,7 @@ class DossierMedicalModal2(discord.ui.Modal, title="Dossier Médical (2/4) - Ant
         next_view = NextStepView(DossierMedicalModal3(self.data), label="Étape 3/4 : Examen clinique ➡️")
         await interaction.response.send_message("✅ **Étape 2/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-class DossierMedicalModal(discord.ui.Modal, title="Dossier Médical (1/4) - Identité"):
+class DossierMedicalModal(SafeModal, title="Dossier Médical (1/4) - Identité"):
     prenom = discord.ui.TextInput(label="Prénom", placeholder="Ex: Jean")
     nom = discord.ui.TextInput(label="Nom de famille", placeholder="Ex: Dupont")
     date_naissance = discord.ui.TextInput(label="Date de naissance", placeholder="JJ/MM/AAAA")
@@ -1079,7 +1092,7 @@ async def _finaliser_modif_dossier(interaction: discord.Interaction, ancien_pren
     embed.set_footer(text=f"Modifié par {interaction.user.display_name}")
     await interaction.response.send_message(embed=embed)
 
-class DossierModifierModal6(discord.ui.Modal, title="Modification (6/6) - Signature"):
+class DossierModifierModal6(SafeModal, title="Modification (6/6) - Signature"):
     nouvelle_signature = discord.ui.TextInput(label="Nouvelle Signature", placeholder="Nouvelle signature", required=False)
     def __init__(self, ancien_prenom: str, ancien_nom: str, data: dict):
         super().__init__()
@@ -1090,7 +1103,7 @@ class DossierModifierModal6(discord.ui.Modal, title="Modification (6/6) - Signat
         self.data["nouvelle_signature"] = self.nouvelle_signature.value
         await _finaliser_modif_dossier(interaction, self.ancien_prenom, self.ancien_nom, self.data)
 
-class DossierModifierModal5(discord.ui.Modal, title="Modification (5/6) - Conclusion"):
+class DossierModifierModal5(SafeModal, title="Modification (5/6) - Conclusion"):
     nouvelle_vision = discord.ui.TextInput(label="Nouvelle Vision", placeholder="Normale / Corrigée / Trouble", required=False)
     nouvelle_audition = discord.ui.TextInput(label="Nouvelle Audition", placeholder="Normale / Diminuée", required=False)
     nouvelles_observations = discord.ui.TextInput(label="Nouvelles Observations", style=discord.TextStyle.paragraph, required=False)
@@ -1112,7 +1125,7 @@ class DossierModifierModal5(discord.ui.Modal, title="Modification (5/6) - Conclu
         next_view = NextStepView(DossierModifierModal6(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 6/6 : Signature ➡️")
         await interaction.response.send_message("✅ **Étape 5/6 validée.** Cliquez ci-dessous pour terminer.", view=next_view, ephemeral=True)
 
-class DossierModifierModal4(discord.ui.Modal, title="Modification (4/6) - Examen clinique"):
+class DossierModifierModal4(SafeModal, title="Modification (4/6) - Examen clinique"):
     nouvelle_taille = discord.ui.TextInput(label="Nouvelle Taille", placeholder="cm", required=False)
     nouveau_poids = discord.ui.TextInput(label="Nouveau Poids", placeholder="kg", required=False)
     nouveau_groupe = discord.ui.TextInput(label="Nouveau Groupe sanguin", placeholder="Ex: A+", required=False)
@@ -1134,7 +1147,7 @@ class DossierModifierModal4(discord.ui.Modal, title="Modification (4/6) - Examen
         next_view = NextStepView(DossierModifierModal5(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 5/6 : Conclusion ➡️")
         await interaction.response.send_message("✅ **Étape 4/6 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-class DossierModifierModal3(discord.ui.Modal, title="Modification (3/6) - Antécédents"):
+class DossierModifierModal3(SafeModal, title="Modification (3/6) - Antécédents"):
     nouveau_medecin = discord.ui.TextInput(label="Nouveau Médecin / EMS", placeholder="Nouveau médecin", required=False)
     nouvelles_allergies = discord.ui.TextInput(label="Nouvelles Allergies", placeholder="Nouvelles allergies", style=discord.TextStyle.paragraph, required=False)
     nouvelles_maladies = discord.ui.TextInput(label="Nouvelles Maladies chroniques", placeholder="Nouvelles maladies", style=discord.TextStyle.paragraph, required=False)
@@ -1156,7 +1169,7 @@ class DossierModifierModal3(discord.ui.Modal, title="Modification (3/6) - Antéc
         next_view = NextStepView(DossierModifierModal4(self.ancien_prenom, self.ancien_nom, self.data), label="Étape 4/6 : Examen clinique ➡️")
         await interaction.response.send_message("✅ **Étape 3/6 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-class DossierModifierModal2(discord.ui.Modal, title="Modification (2/6) - Nouvelle Identité"):
+class DossierModifierModal2(SafeModal, title="Modification (2/6) - Nouvelle Identité"):
     nouveau_prenom = discord.ui.TextInput(label="Nouveau Prénom", placeholder="Nouveau prénom", required=False)
     nouveau_nom = discord.ui.TextInput(label="Nouveau Nom", placeholder="Nouveau nom", required=False)
     nouvelle_date_naissance = discord.ui.TextInput(label="Nouvelle Date de naissance", placeholder="JJ/MM/AAAA", required=False)
@@ -1183,7 +1196,7 @@ class DossierModifierModal2(discord.ui.Modal, title="Modification (2/6) - Nouvel
         )
         await interaction.response.send_message("✅ **Étape 2/6 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-class DossierMedicalModifierModal(discord.ui.Modal, title="Modification (1/6) - Identification"):
+class DossierMedicalModifierModal(SafeModal, title="Modification (1/6) - Identification"):
     ancien_prenom = discord.ui.TextInput(label="Ancien Prénom", placeholder="Prénom actuel", required=True)
     ancien_nom = discord.ui.TextInput(label="Ancien Nom", placeholder="Nom actuel", required=True)
 
@@ -1257,7 +1270,7 @@ async def _finaliser_rapport_intervention(interaction: discord.Interaction, data
     except discord.HTTPException:
         await interaction.followup.send(embed=embed, view=view)
 
-class RapportInterventionModal4(discord.ui.Modal, title="Rapport EMS (4/4) - Conclusion"):
+class RapportInterventionModal4(SafeModal, title="Rapport EMS (4/4) - Conclusion"):
     conclusion = discord.ui.TextInput(label="Conclusion de l'intervention", placeholder="Patient stabilisé / transporté / décédé malgré les soins", style=discord.TextStyle.paragraph)
     signature = discord.ui.TextInput(label="Signature du médecin / secouriste", placeholder="Signature", required=False)
     def __init__(self, data: dict):
@@ -1267,7 +1280,7 @@ class RapportInterventionModal4(discord.ui.Modal, title="Rapport EMS (4/4) - Con
         self.data.update({"conclusion": self.conclusion.value, "signature": self.signature.value})
         await _finaliser_rapport_intervention(interaction, self.data)
 
-class RapportInterventionModal3(discord.ui.Modal, title="Rapport EMS (3/4) - Procédure"):
+class RapportInterventionModal3(SafeModal, title="Rapport EMS (3/4) - Procédure"):
     premiers_soins = discord.ui.TextInput(label="Premiers soins", placeholder="Massage cardiaque / Garrot / Pansement, etc.", style=discord.TextStyle.paragraph, required=False)
     stabilisation = discord.ui.TextInput(label="Stabilisation", placeholder="Oxygène / Médicaments / Défibrillateur", style=discord.TextStyle.paragraph, required=False)
     transport = discord.ui.TextInput(label="Transport", placeholder="Oui / Non")
@@ -1287,7 +1300,7 @@ class RapportInterventionModal3(discord.ui.Modal, title="Rapport EMS (3/4) - Pro
         next_view = NextStepView(RapportInterventionModal4(self.data), label="Étape 4/4 : Conclusion ➡️")
         await interaction.response.send_message("✅ **Étape 3/4 validée.** Cliquez ci-dessous pour terminer.", view=next_view, ephemeral=True)
 
-class RapportInterventionModal2(discord.ui.Modal, title="Rapport EMS (2/4) - Patient"):
+class RapportInterventionModal2(SafeModal, title="Rapport EMS (2/4) - Patient"):
     lieu = discord.ui.TextInput(label="Lieu de l'intervention", placeholder="Adresse ou lieu précis", style=discord.TextStyle.paragraph)
     patient_prenom = discord.ui.TextInput(label="Prénom du patient", placeholder="Prénom")
     patient_nom = discord.ui.TextInput(label="Nom du patient", placeholder="Nom de famille")
@@ -1315,7 +1328,7 @@ class RapportInterventionModal2(discord.ui.Modal, title="Rapport EMS (2/4) - Pat
         next_view = NextStepView(RapportInterventionModal3(self.data), label="Étape 3/4 : Procédure ➡️")
         await interaction.response.send_message("✅ **Étape 2/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-class RapportInterventionModal(discord.ui.Modal, title="Rapport EMS (1/4) - Horaires"):
+class RapportInterventionModal(SafeModal, title="Rapport EMS (1/4) - Horaires"):
     date = discord.ui.TextInput(label="Date", placeholder="JJ/MM/AAAA")
     heure_appel = discord.ui.TextInput(label="Heure d'appel", placeholder="HH:MM")
     heure_arrivee = discord.ui.TextInput(label="Heure d'arrivée sur les lieux", placeholder="HH:MM")
@@ -1478,7 +1491,7 @@ class FacturationItemSelect(discord.ui.Select):
         item = FACTURATION_CATEGORIES[self.cat_key]["items"][key]
         await interaction.response.send_modal(QuantityModal(self.session, key, item, self.cat_key))
 
-class QuantityModal(discord.ui.Modal, title="Quantité du soin"):
+class QuantityModal(SafeModal, title="Quantité du soin"):
     quantite = discord.ui.TextInput(label="Combien de fois ?", placeholder="Ex: 2", default="1")
     def __init__(self, session: FacturationSession, item_key: str, item_data: dict, cat_key: str):
         super().__init__()
@@ -1815,7 +1828,7 @@ class OrdonnanceItemSelect(discord.ui.Select):
         med = MEDICAMENTS_CATEGORIES[self.cat_key]["items"][key]
         await interaction.response.send_modal(DureeModal(self.session, med))
 
-class DureeModal(discord.ui.Modal, title="Durée du traitement"):
+class DureeModal(SafeModal, title="Durée du traitement"):
     jours = discord.ui.TextInput(label="Nombre de jours de traitement", placeholder="Ex: 7", default="7")
     def __init__(self, session: OrdonnanceSession, med: dict):
         super().__init__()
@@ -2117,7 +2130,7 @@ async def ppa_resultat(interaction: discord.Interaction, prenom: str, nom: str):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ---------- AUTOPSIE ----------
-class AutopsieModal4(discord.ui.Modal, title="Autopsie (4/4) - Conclusions"):
+class AutopsieModal4(SafeModal, title="Autopsie (4/4) - Conclusions"):
     traces_substances = discord.ui.TextInput(label="Traces de substances", placeholder="Alcool, drogues, médicaments...", style=discord.TextStyle.paragraph, required=False)
     conclusions = discord.ui.TextInput(label="Conclusions du légiste", placeholder="Conclusion médico-légale", style=discord.TextStyle.paragraph)
     medecin_legiste = discord.ui.TextInput(label="Médecin légiste", placeholder="Nom complet")
@@ -2135,7 +2148,7 @@ class AutopsieModal4(discord.ui.Modal, title="Autopsie (4/4) - Conclusions"):
         })
         await _finaliser_autopsie(interaction, self.data)
 
-class AutopsieModal3(discord.ui.Modal, title="Autopsie (3/4) - Cause & Arme"):
+class AutopsieModal3(SafeModal, title="Autopsie (3/4) - Cause & Arme"):
     cause_probable = discord.ui.TextInput(label="Cause probable du décès", placeholder="Arrêt cardiaque, hémorragie, asphyxie...", style=discord.TextStyle.paragraph)
     type_arme = discord.ui.TextInput(label="Type d'arme / impact", placeholder="Arme à feu, arme blanche, chute, etc.", style=discord.TextStyle.paragraph, required=False)
 
@@ -2151,7 +2164,7 @@ class AutopsieModal3(discord.ui.Modal, title="Autopsie (3/4) - Cause & Arme"):
         next_view = NextStepView(AutopsieModal4(self.data), label="Étape 4/4 : Conclusions ➡️")
         await interaction.response.send_message("✅ **Étape 3/4 validée.** Cliquez ci-dessous pour terminer.", view=next_view, ephemeral=True)
 
-class AutopsieModal2(discord.ui.Modal, title="Autopsie (2/4) - Détails du décès"):
+class AutopsieModal2(SafeModal, title="Autopsie (2/4) - Détails du décès"):
     date_deces = discord.ui.TextInput(label="Date du décès", placeholder="JJ/MM/AAAA")
     heure_estimee = discord.ui.TextInput(label="Heure estimée du décès", placeholder="HH:MM", required=False)
 
@@ -2167,7 +2180,7 @@ class AutopsieModal2(discord.ui.Modal, title="Autopsie (2/4) - Détails du déc�
         next_view = NextStepView(AutopsieModal3(self.data), label="Étape 3/4 : Cause & Arme ➡️")
         await interaction.response.send_message("✅ **Étape 2/4 validée.** Cliquez ci-dessous pour continuer.", view=next_view, ephemeral=True)
 
-class AutopsieModal(discord.ui.Modal, title="Autopsie (1/4) - Patient"):
+class AutopsieModal(SafeModal, title="Autopsie (1/4) - Patient"):
     patient_prenom = discord.ui.TextInput(label="Prénom du patient", placeholder="Prénom")
     patient_nom = discord.ui.TextInput(label="Nom du patient", placeholder="Nom")
 
@@ -2820,16 +2833,3 @@ if __name__ == "__main__":
             asyncio.run(main())
         except KeyboardInterrupt:
             print("\n🛑 Bot arrêté manuellement.")
-            class SafeModal(discord.ui.Modal):
-                
-    async def on_error(self, interaction: discord.Interaction, error: Exception):
-        logger.error("Erreur dans le modal %s : %s", self.title, error)
-        traceback.print_exception(type(error), error, error.__traceback__)
-        message = "Une erreur est survenue en traitant ce formulaire."
-        try:
-            if interaction.response.is_done():
-                await interaction.followup.send(message, ephemeral=True)
-            else:
-                await interaction.response.send_message(message, ephemeral=True)
-        except discord.HTTPException:
-            pass
